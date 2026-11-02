@@ -53,7 +53,12 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
                 await page.locator(f'input[name="{name}"]').fill(value)
             await page.select_option('select[name="relocation"]', 'india')
             await page.select_option('select[name="experience_flexibility"]', 'one_year')
-            await page.select_option('select[name="resume_mode"]', 'tailored')
+            assert await page.locator('input[name="resume_mode"]').count() == 3
+            await page.locator('input[name="resume_mode"][value="review"]').check()
+            assert 'approve each application' in await page.locator('#consent-text').inner_text()
+            await page.locator('input[name="consent"]').check()
+            await page.locator('input[name="resume_mode"][value="tailored"]').check()
+            assert not await page.locator('input[name="consent"]').is_checked()
             await page.locator('input[name="resume"]').set_input_files({
                 'name': 'resume.pdf', 'mimeType': 'application/pdf', 'buffer': b'%PDF-test',
             })

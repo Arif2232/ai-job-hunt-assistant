@@ -45,7 +45,13 @@
           <div class="section-head"><span class="step">03</span><div><h2>Your resume and AI</h2><p>Help us check which jobs are a good fit.</p></div></div>
           <div class="fields">
             <label>Resume <span class="required">*</span><input name="resume" type="file" accept="application/pdf,.pdf" required><small>PDF with selectable text, up to 5 MB.</small></label>
-            <label>Resume for applications <select name="resume_mode"><option value="original">Use my original resume</option><option value="tailored">Tailor automatically for each job</option></select><small>Automatic tailoring adds a page of exact lines from your resume and keeps the original pages. It uses additional AI requests.</small></label>
+            <fieldset class="resume-modes">
+              <legend>How should we apply?</legend>
+              <label class="resume-mode"><input type="radio" name="resume_mode" value="tailored"><span><strong>1. Tailor and apply automatically</strong><small>AI selects relevant lines from your resume for each job, then applies without asking.</small></span></label>
+              <label class="resume-mode"><input type="radio" name="resume_mode" value="review"><span><strong>2. Tailor and review each application</strong><small>Review the job and tailored resume; approve or skip before an application is sent.</small></span></label>
+              <label class="resume-mode"><input type="radio" name="resume_mode" value="original" checked><span><strong>3. Apply with my original resume</strong><small>Use the uploaded PDF for every application, without a review step.</small></span></label>
+              <small>Tailoring adds a page of exact lines from your resume and keeps the original pages. It uses additional AI requests.</small>
+            </fieldset>
             <div class="fields two">
               <label>AI provider <select name="provider" id="provider" required><option value="">Loading options…</option></select></label>
               <label>Model <select name="model" id="model" required><option value="">Choose a provider</option></select></label>
@@ -61,8 +67,8 @@
             </div>
             <p id="privacy-note" class="model-hint" hidden>Gemini's free tier may use submitted data to improve Google's products. Check your plan's privacy terms.</p>
             <details class="draft-tool">
-              <summary>Tailor and review a resume for one job</summary>
-              <p>Paste a job description to create an editable draft. Your resume text and the description are sent to your AI provider, and API charges may apply.</p>
+              <summary>Optional: create a separate editable resume draft</summary>
+              <p>Paste a job description to create a draft outside the search. Your resume text and the description are sent to your AI provider, and API charges may apply.</p>
               <label>Job description <textarea id="job-description" rows="6" maxlength="16000" placeholder="Paste the job description here"></textarea></label>
               <button type="button" id="draft-button" class="secondary" disabled>Generate resume draft</button>
               <p id="draft-message" role="status" hidden></p>
@@ -78,11 +84,26 @@
           <label class="consent"><input type="checkbox" name="consent" required><span id="consent-text">I want to apply automatically. My resume text and job preferences are sent to my selected AI provider for matching, and my resume and details are sent to employers for supported applications.</span></label>
           <p class="notice">Each search attempts up to 5 applications, checking recent jobs until the goal is reached or no more are available. AI charges may increase with more checks. If a submission cannot be confirmed, it counts toward the limit. Unsupported forms are left for your review.</p>
           <p id="error" class="error" role="alert" hidden></p>
+          <p id="approval-prompt" class="notice" role="status" hidden>An application is waiting for your approval. <a href="#review-card">Review it</a></p>
           <div class="actions"><button type="submit" id="start" disabled>Find and apply <span aria-hidden="true">↗</span></button><button type="button" id="stop" class="secondary" hidden>Stop after current job</button></div>
           <small>Test your AI connection before starting a search.</small>
         </section>
       </form>
       <aside class="sidebar">
+        <section id="review-card" class="progress-card review-card" hidden>
+          <p class="eyebrow">YOUR APPROVAL</p>
+          <h2>Review this application</h2>
+          <p id="review-job" class="review-job"></p>
+          <a id="review-job-link" target="_blank" rel="noopener noreferrer" hidden>View job ↗</a>
+          <details class="review-details"><summary>View job description</summary><p id="review-description"></p></details>
+          <p class="review-note">Check the job and tailored resume. Approving may send a real application.</p>
+          <label>Review and edit the tailored highlights <textarea id="review-highlights" rows="6" maxlength="1205"></textarea><small>Use 1 to 6 lines. Add only skills and experience you actually have. Your original resume pages stay unchanged.</small></label>
+          <details class="review-details"><summary>View original resume text</summary><p id="review-original"></p><small id="review-truncated" hidden>The full original resume is included in the PDF.</small></details>
+          <p id="review-message" role="status"></p>
+          <button type="button" id="review-retry" class="secondary">Update PDF after editing</button>
+          <a id="review-download" download="tailored-resume.pdf" hidden>Download the resume to review ↗</a>
+          <div class="actions"><button type="button" id="review-approve" disabled>Approve and apply</button><button type="button" id="review-skip" class="secondary">Skip this job</button></div>
+        </section>
         <section class="progress-card" aria-live="polite">
           <div class="progress-heading"><div><p class="eyebrow">YOUR SEARCH</p><h2>What's happening</h2></div><span id="status" class="status">Ready</span></div>
           <div id="empty" class="empty"><span aria-hidden="true">✧</span><h3>Your search starts here</h3><p>Once you start, updates and application results will appear here.</p></div>

@@ -115,7 +115,8 @@ def test_local_interface_checks_token_and_consent_without_sending_anything(tmp_p
     assert all(b'test-api-key-not-real' not in path.read_bytes() for path in Path(tmp_path).rglob('*') if path.is_file())
 
 
-def test_search_preferences_are_validated_and_reach_the_runner(tmp_path, monkeypatch):
+@pytest.mark.parametrize('mode', ['original', 'tailored', 'review'])
+def test_search_preferences_are_validated_and_reach_the_runner(tmp_path, monkeypatch, mode):
     calls = []
     async def fake_hunt(candidate, path, text, key, ledger, report, stop, **kwargs):
         calls.append(candidate)
@@ -126,7 +127,7 @@ def test_search_preferences_are_validated_and_reach_the_runner(tmp_path, monkeyp
     server.state.update({'task': None, 'events': []})
     form = {'first_name': 'Avery', 'last_name': 'Example', 'email': 'candidate@example.com',
             'phone': '1234567890', 'role': 'Engineer', 'api_key': 'test-api-key-not-real', 'consent': 'true',
-            'relocation': 'india', 'experience_flexibility': 'one_year', 'resume_mode': 'tailored'}
+            'relocation': 'india', 'experience_flexibility': 'one_year', 'resume_mode': mode}
     verify_settings(form)
     files = {'resume': ('resume.pdf', b'%PDF-test', 'application/pdf')}
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
@@ -143,7 +144,7 @@ def test_search_preferences_are_validated_and_reach_the_runner(tmp_path, monkeyp
         assert response.status_code == 200
         client.get('/api/status', headers={'X-App-Token': server.TOKEN})
     assert calls[0]['relocation'] == 'india' and calls[0]['experience_flexibility'] == 'one_year'
-    assert calls[0]['resume_mode'] == 'tailored'
+    assert calls[0]['resume_mode'] == mode
 
 
 @pytest.mark.parametrize('provider,model', [

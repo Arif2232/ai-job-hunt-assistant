@@ -21,10 +21,10 @@ You choose when a search starts. The app shows what happened, highlights applica
 - **Discover recent jobs:** prioritize listings from the last 30 days with a verified posting date. Start with India and worldwide remote roles, or search more widely.
 - **Check the fit:** use your own OpenAI, Gemini, or Claude API key and choose a suggested model or another model ID. The app checks recent jobs until the application goal is reached or the results run out; API charges increase with usage.
 - **Apply where supported:** attempt up to 5 straightforward applications per search using your contact details and existing resume. Unconfirmed submissions count toward the limit to avoid sending too many.
-- **Tailor your resume:** choose your original PDF or let the app add job-relevant lines copied from it before each application. You can also generate an editable draft for a pasted job description, review it, and save it as a PDF.
+- **Choose how to apply:** tailor and apply automatically, tailor and approve each application, or use your original resume for every application.
 - **Stay informed:** see progress, open jobs that need manual attention, and avoid automatically retrying an uncertain or previously attempted submission.
 
-Automatically tailored resumes retain your original pages and add only complete lines copied from your resume. The editable AI draft can make mistakes; check every detail and add skills only if you have them. The app searches selected public sources, not every job site. Some forms need extra answers, login, or human verification and are left for you to complete. AI matching and automatic submission are not guaranteed.
+Tailoring adds a page of job-relevant lines copied from your resume and retains the original pages. In review mode, the app pauses for each job so you can edit those highlights, inspect the tailored PDF, and approve or skip it. An optional separate editor can create a rewritten draft; check every detail and add skills only if you have them. The app searches selected public sources, not every job site. Some forms need extra answers, login, or human verification and are left for you to complete. AI matching and automatic submission are not guaranteed.
 
 Read-only search has been smoke-tested with public listings. AI calls and application submissions have only been tested with simulated responses and forms.
 
@@ -40,7 +40,7 @@ No coding is needed to use the app, but you do need Python and an AI provider AP
    - **Ubuntu:** allow `Start-Linux.sh` to run as a program, then open it. If your desktop opens the file as text, open a terminal in the folder and run `bash Start-Linux.sh`. If setup says the virtual environment is unavailable, run `sudo apt install python3-venv` once and try again.
 4. **Wait for the page to open.** The first start installs the app and its browser, so it can take a few minutes. Keep the terminal window open while using it.
 5. **Set up your search.** Enter the job you want, your contact details, and a text-based PDF resume. Choose your relocation and experience preferences. Choose an AI provider, select **Get an API key**, then copy the key from that provider and paste it into the page. A provider account and API billing may be required. Use **Test AI connection** to check your key and model before searching; this sends example text, may incur a small charge, and does not send your resume or any applications.
-6. **Start when ready.** After a successful connection test, choose your resume option, review the confirmation, and select **Find and apply**. This can send real applications. Use **Stop after current job** if you want to stop.
+6. **Start when ready.** Choose one of the three application options, test your AI connection, and select **Find and apply**. In review mode, inspect the job and resume, edit the highlights if needed, and update the PDF. Then choose **Approve and apply** or **Skip this job** for each match. The other options can send real applications without further review. Use the **Stop** button to stop the search.
 
 Mac startup has been tested locally. The Windows and Ubuntu launchers have automated checks but have not yet been tested on those operating systems.
 
@@ -48,7 +48,7 @@ Mac startup has been tested locally. The Windows and Ubuntu launchers have autom
 
 - **The browser did not open:** copy the local address shown in the terminal into your browser.
 - **The AI provider rejects your key or model:** use **Test AI connection**, then check the selected provider, key, model access, and any required API billing; then try again.
-- **You want to review a tailored resume first:** open **Tailor and review a resume for one job**, paste its description, and create a draft. Edit and check it, select **Print or save as PDF**, and upload the saved PDF above if you want to use it for a search.
+- **You want to rewrite your resume separately:** open **Optional: create a separate editable resume draft**, paste a job description, and create a draft. Edit and check it, select **Print or save as PDF**, and upload the saved PDF above if you want to use it for a search.
 - **No matching jobs appeared:** try a broader job title or location.
 
 ## Your choices and privacy

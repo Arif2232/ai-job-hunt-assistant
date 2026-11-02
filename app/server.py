@@ -12,7 +12,7 @@ from typing import Literal
 import httpx
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from pypdf import PdfReader
@@ -21,7 +21,7 @@ from openai import AsyncOpenAI
 from app.matching import PROVIDERS, ai_match, selected_model
 from app.runner import ai_error_message, run_hunt
 from app.storage import ApplicationLog
-from app.tailoring import resume_draft
+from app.tailoring import make_tailored_pdf, resume_draft
 from src.models import Job
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +32,7 @@ CONNECTION_SECRET = secrets.token_bytes(32)
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=['localhost', '127.0.0.1'])
 app.mount('/assets', StaticFiles(directory=WEB), name='assets')
-state = {'task': None, 'events': [], 'stop': asyncio.Event()}
+state = {'task': None, 'events': [], 'stop': asyncio.Event(), 'review': None, 'resume_mode': None}
 START_LOCK = asyncio.Lock()
 
 
@@ -46,7 +46,7 @@ class Candidate(BaseModel):
     region: Literal['india', 'anywhere'] = 'india'
     relocation: Literal['unknown', 'india', 'anywhere', 'no'] = 'unknown'
     experience_flexibility: Literal['strict', 'one_year', 'flexible'] = 'strict'
-    resume_mode: Literal['original', 'tailored'] = 'original'
+    resume_mode: Literal['original', 'tailored', 'review'] = 'original'
     max_applications: int = Field(default=5, ge=1, le=10)
 
     @field_validator('first_name', 'last_name', 'email', 'phone', 'role', 'location', mode='before')
@@ -117,13 +117,71 @@ def report(kind, message, job=None):
     state['events'] = state['events'][-200:]
 
 
+async def wait_for_review(job, pdf: Path, highlights, resume, stop, *, original_pdf=None, candidate=None):
+    future = asyncio.get_running_loop().create_future()
+    pending = {'id': secrets.token_urlsafe(18), 'job': job, 'pdf': pdf, 'highlights': highlights,
+               'resume': resume, 'future': future, 'original_pdf': original_pdf, 'candidate': candidate}
+    state['review'] = pending
+    report('awaiting_review', 'Review this job and tailored resume before applying.', job)
+    stopped = asyncio.create_task(stop.wait())
+    try:
+        await asyncio.wait((future, stopped), return_when=asyncio.FIRST_COMPLETED)
+        return 'stop' if stop.is_set() else future.result()
+    finally:
+        stopped.cancel()
+        await asyncio.gather(stopped, return_exceptions=True)
+        if not future.done():
+            future.cancel()
+        if state.get('review') is pending:
+            state['review'] = None
+
+
+def pending_review(review_id):
+    pending = state.get('review')
+    if (not re.fullmatch(r'[A-Za-z0-9_-]{16,64}', review_id) or not pending
+            or pending['future'].done() or state['stop'].is_set()
+            or not hmac.compare_digest(review_id, pending['id'])):
+        raise HTTPException(status_code=409, detail='This job is no longer waiting for review.')
+    return pending
+
+
+def update_review_pdf(pending, text):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not 1 <= len(lines) <= 6 or any(not 3 <= len(line) <= 200 or
+                                        any(not char.isprintable() and char not in '\t\u00a0' for char in line) for line in lines):
+        raise HTTPException(status_code=400, detail='Use 1 to 6 highlights, each 3 to 200 characters.')
+    if lines != pending['highlights']:
+        candidate = pending['candidate']
+        if not candidate or not pending['original_pdf']:
+            raise HTTPException(status_code=400, detail='This resume cannot be edited. Skip the job and try again.')
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=pending['pdf'].parent, suffix='.pdf', delete=False) as handle:
+                temporary = Path(handle.name)
+            make_tailored_pdf(pending['original_pdf'], lines, temporary,
+                              name=f"{candidate['first_name']} {candidate['last_name']}",
+                              email=candidate['email'], phone=candidate['phone'], job_title=pending['job'].title)
+            temporary.replace(pending['pdf'])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail='Could not fit or display the highlights. Edit them and try again.') from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail='Could not prepare the tailored resume.') from exc
+        finally:
+            if temporary:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        pending['highlights'] = lines
+
+
 @app.middleware('http')
 async def local_headers(request: Request, call_next):
-    if request.method == 'POST' and request.url.path in ('/api/start', '/api/test-ai', '/api/tailor-resume'):
+    if request.method == 'POST' and request.url.path in ('/api/start', '/api/test-ai', '/api/tailor-resume', '/api/review', '/api/review-preview'):
         try:
             if 'content-length' not in request.headers:
                 return HTMLResponse('A content length is required.', status_code=411)
-            limit = 10_000 if request.url.path == '/api/test-ai' else 5_500_000
+            limit = 10_000 if request.url.path in ('/api/test-ai', '/api/review', '/api/review-preview') else 5_500_000
             if int(request.headers['content-length']) > limit:
                 return HTMLResponse('Request is too large.', status_code=413)
         except ValueError:
@@ -150,14 +208,61 @@ async def options(x_app_token: str | None = Header(default=None)):
 async def status(x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
     task = state['task']
-    return {'running': bool(task and not task.done()), 'events': state['events']}
+    running = bool(task and not task.done())
+    pending = state.get('review')
+    review = None
+    if pending and not pending['future'].done() and not state['stop'].is_set():
+        job = pending['job']
+        review = {'id': pending['id'], 'title': job.title, 'company': job.company, 'url': job.apply_url,
+                  'description': job.description[:16000], 'highlights': pending['highlights'],
+                  'original_resume': pending['resume'][:30000], 'resume_truncated': len(pending['resume']) > 30000}
+    return {'running': running, 'events': state['events'], 'review': review,
+            'resume_mode': state.get('resume_mode') if running else None}
 
 
 @app.post('/api/stop')
 async def stop(x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
     state['stop'].set()
-    return {'message': 'Stopping after the current job.'}
+    return {'message': 'Stopping the search.'}
+
+
+@app.get('/api/review-resume')
+async def review_resume(review_id: str, x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    pending = pending_review(review_id)
+    try:
+        content = pending['pdf'].read_bytes()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail='Could not open the tailored resume.') from exc
+    return Response(content, media_type='application/pdf', headers={'Content-Disposition': 'inline; filename="tailored-resume.pdf"'})
+
+
+@app.post('/api/review-preview')
+async def review_preview(review_id: str = Form(...), highlights: str = Form(...),
+                         x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    pending = pending_review(review_id)
+    update_review_pdf(pending, highlights)
+    try:
+        content = pending['pdf'].read_bytes()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail='Could not open the tailored resume.') from exc
+    return Response(content, media_type='application/pdf', headers={'Content-Disposition': 'inline; filename="tailored-resume.pdf"'})
+
+
+@app.post('/api/review')
+async def review_decision(review_id: str = Form(...), action: str = Form(...),
+                          highlights: str | None = Form(default=None),
+                          x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    if action not in ('approve', 'skip'):
+        raise HTTPException(status_code=400, detail='Choose approve or skip.')
+    pending = pending_review(review_id)
+    if action == 'approve' and highlights is not None:
+        update_review_pdf(pending, highlights)
+    pending['future'].set_result(action)
+    return {'message': 'Applying to this job.' if action == 'approve' else 'Skipping this job.'}
 
 
 @app.post('/api/test-ai')
@@ -256,11 +361,13 @@ async def start(
             raise HTTPException(status_code=500, detail='Could not prepare the resume. Check storage access and the .local folder.') from exc
         state['events'] = []
         state['stop'] = asyncio.Event()
+        state['review'] = None
+        state['resume_mode'] = candidate['resume_mode']
 
         async def worker():
             try:
                 await run_hunt(candidate, path, text, api_key.strip(), ApplicationLog(DATA), report, state['stop'],
-                               provider=provider, model=model, workspace_id=workspace_id)
+                               provider=provider, model=model, workspace_id=workspace_id, request_review=wait_for_review)
             except Exception:
                 report('error', 'The search could not finish. Check your connection and try again.')
             finally:

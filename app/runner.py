@@ -114,8 +114,12 @@ def ai_error_message(error):
 
 
 async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str, ledger, report, stop,
-                   *, provider='openai', model='', workspace_id=''):
+                   *, provider='openai', model='', workspace_id='', request_review=None):
     model = selected_model(provider, model)
+    resume_mode = candidate.get('resume_mode', 'original')
+    if resume_mode == 'review' and request_review is None:
+        report('error', 'The review step is unavailable. Please restart the app.')
+        return
     report('searching', 'Looking for recent jobs that match your preferences.')
     async with HTTP(concurrency=8) as http:
         async def fetch(source, board):
@@ -145,6 +149,7 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
             browser = None
             try:
                 invalid_responses = 0
+                invalid_tailoring_responses = 0
                 for job in jobs:
                     if stop.is_set() or attempts >= candidate['max_applications']:
                         break
@@ -172,27 +177,27 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                         continue
                     if stop.is_set():
                         break
-                    if browser is None:
-                        try:
-                            browser = await playwright.chromium.launch(headless=False)
-                        except Exception:
-                            report('error', 'The application browser is not installed. Restart the app using the startup file for your computer.')
-                            return
                     temporary = None
                     try:
                         application_resume = resume
-                        if candidate.get('resume_mode') == 'tailored':
+                        if resume_mode in ('tailored', 'review'):
                             report('reviewing', 'Preparing a tailored resume from your existing resume.', job)
                             try:
                                 lines = await resume_highlights(client, resume_text, job.title, job.description,
                                                                 provider=provider, model=model, api_key=api_key,
                                                                 workspace_id=workspace_id)
                             except ValueError:
-                                report('error', 'Could not safely tailor the resume. Try the original resume or review a draft.')
-                                return
+                                invalid_tailoring_responses += 1
+                                needs_review += 1
+                                report('needs_attention', 'Could not safely tailor the resume for this job. You can review it manually.', job)
+                                if invalid_tailoring_responses >= 3:
+                                    report('error', 'Could not safely tailor several resumes. Try the original resume or another model.')
+                                    return
+                                continue
                             except Exception as exc:
                                 report('error', ai_error_message(exc))
                                 return
+                            invalid_tailoring_responses = 0
                             if stop.is_set():
                                 break
                             try:
@@ -203,6 +208,26 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                                                   email=candidate['email'], phone=candidate['phone'], job_title=job.title)
                             except Exception:
                                 report('error', 'Could not prepare the tailored PDF. Try the original resume or review a draft.')
+                                return
+                        if resume_mode == 'review':
+                            action = await request_review(job, application_resume, lines, resume_text, stop,
+                                                          original_pdf=resume, candidate=candidate)
+                            if action == 'stop':
+                                stop.set()
+                                break
+                            if action == 'skip':
+                                report('skipped', 'Skipped by you.', job)
+                                continue
+                            if action != 'approve':
+                                report('error', 'The review could not be completed. No application was sent.')
+                                return
+                        if stop.is_set():
+                            break
+                        if browser is None:
+                            try:
+                                browser = await playwright.chromium.launch(headless=False)
+                            except Exception:
+                                report('error', 'The application browser is not installed. Restart the app using the startup file for your computer.')
                                 return
                         page = await browser.new_page()
                         try:

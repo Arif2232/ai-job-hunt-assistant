@@ -61,7 +61,8 @@ def resume_font():
 async def resume_highlights(client, resume_text, title, description, *, provider, model, api_key, workspace_id=''):
     font = resume_font()
     source = [line.strip() for line in resume_text[:16000].splitlines() if 3 <= len(line.strip()) <= 200
-              and all(ord(char) <= 127 or ord(char) in font.face.charWidths for char in line)]
+              and all((char.isprintable() or char in '\t\u00a0')
+                      and (ord(char) <= 127 or ord(char) in font.face.charWidths) for char in line)]
     if not source:
         raise ValueError('No supported resume lines are available for tailoring.')
     result = await ai_structured(
