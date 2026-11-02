@@ -16,8 +16,11 @@ const modelPrice = document.getElementById('model-price');
 const keyLink = document.getElementById('key-link');
 const consentText = document.getElementById('consent-text');
 const privacyNote = document.getElementById('privacy-note');
+const testAI = document.getElementById('test-ai');
+const testResult = document.getElementById('test-ai-result');
 let providers = {};
 let lastEvents = '';
+let settingsVersion = 0;
 
 function showError(message) {
   error.textContent = message;
@@ -32,7 +35,8 @@ async function status() {
     start.disabled = data.running;
     stop.hidden = !data.running;
     if (!data.running) stop.textContent = 'Stop after current job';
-    statusLabel.textContent = data.running ? 'In progress' : data.events.length ? 'Finished' : 'Ready';
+    const lastKind = data.events.at(-1)?.kind;
+    statusLabel.textContent = data.running ? 'In progress' : lastKind === 'error' ? 'Needs attention' : lastKind === 'stopped' ? 'Stopped' : data.events.length ? 'Finished' : 'Ready';
     const snapshot = JSON.stringify(data.events);
     if (snapshot === lastEvents) return;
     lastEvents = snapshot;
@@ -127,8 +131,39 @@ async function loadOptions() {
   }
 }
 
-provider.addEventListener('change', updateProvider);
-model.addEventListener('change', updateModel);
+function clearTestResult() {
+  settingsVersion++;
+  testResult.hidden = true;
+  testResult.textContent = '';
+}
+
+provider.addEventListener('change', () => { clearTestResult(); updateProvider(); });
+model.addEventListener('change', () => { clearTestResult(); updateModel(); });
+for (const field of [form.elements.api_key, customModel, workspace]) field.addEventListener('input', clearTestResult);
+
+testAI.addEventListener('click', async () => {
+  clearTestResult();
+  if (!form.elements.api_key.reportValidity() || !customModel.reportValidity() || !workspace.reportValidity()) return;
+  const version = settingsVersion;
+  const data = new FormData();
+  data.set('provider', provider.value);
+  data.set('model', model.value === 'custom' ? customModel.value.trim() : model.value);
+  data.set('api_key', form.elements.api_key.value);
+  if (!workspace.disabled) data.set('workspace_id', workspace.value.trim());
+  testAI.disabled = true;
+  testResult.hidden = false;
+  testResult.textContent = 'Testing your AI connection…';
+  try {
+    const response = await fetch('/api/test-ai', { method: 'POST', headers: { 'X-App-Token': token }, body: data });
+    const result = await response.json();
+    if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Could not test the connection.');
+    if (version === settingsVersion) testResult.textContent = result.message;
+  } catch (err) {
+    if (version === settingsVersion) testResult.textContent = err.message || 'Could not test the connection.';
+  } finally {
+    testAI.disabled = false;
+  }
+});
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();

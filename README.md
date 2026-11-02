@@ -38,7 +38,7 @@ No coding is needed to use the app, but you do need Python and an AI provider AP
    - **Mac:** double-click `Start.command`.
    - **Ubuntu:** allow `Start-Linux.sh` to run as a program, then open it. If your desktop opens the file as text, open a terminal in the folder and run `bash Start-Linux.sh`. If setup says the virtual environment is unavailable, run `sudo apt install python3-venv` once and try again.
 4. **Wait for the page to open.** The first start installs the app and its browser, so it can take a few minutes. Keep the terminal window open while using it.
-5. **Set up your search.** Enter the job you want, your contact details, and a text-based PDF resume. Choose an AI provider, select **Get an API key**, then copy the key from that provider and paste it into the page. A provider account and API billing may be required.
+5. **Set up your search.** Enter the job you want, your contact details, and a text-based PDF resume. Choose an AI provider, select **Get an API key**, then copy the key from that provider and paste it into the page. A provider account and API billing may be required. Use **Test AI connection** to check your key and model before searching; this sends example text, may incur a small charge, and does not send your resume or any applications.
 6. **Start when ready.** Review the confirmation and select **Find and apply**. This can send real applications. Use **Stop after current job** if you want to stop.
 
 Mac startup has been tested locally. The Windows and Ubuntu launchers have automated checks but have not yet been tested on those operating systems.
@@ -46,7 +46,7 @@ Mac startup has been tested locally. The Windows and Ubuntu launchers have autom
 ### If you get stuck
 
 - **The browser did not open:** copy the local address shown in the terminal into your browser.
-- **The AI provider rejects your key or model:** check the selected provider, key, model access, and any required API billing; then try again.
+- **The AI provider rejects your key or model:** use **Test AI connection**, then check the selected provider, key, model access, and any required API billing; then try again.
 - **No matching jobs appeared:** try a broader job title or location.
 
 ## Your choices and privacy

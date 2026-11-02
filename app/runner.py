@@ -85,13 +85,21 @@ def ai_error_message(error):
     if status is None and getattr(error, 'response', None) is not None:
         status = getattr(error.response, 'status_code', None)
     if status == 401:
-        return 'The AI provider rejected the API key. Check the key and try again.'
+        return 'The AI provider rejected the API key. Check the key and selected provider.'
     if status == 403:
-        return 'The API key cannot access this model. Check your provider account or choose another model.'
+        return 'This API key cannot access the selected model. Check model access or choose another model.'
     if status == 404:
-        return 'The selected model is unavailable. Choose another model or check your provider account.'
+        return 'The selected model is unavailable. Check its name or choose another model.'
     if status == 429:
-        return 'The AI provider reached a usage limit. Check its rate limits or billing and try again.'
+        return 'The AI provider reached a usage limit. Check API billing, quota, or rate limits.'
+    if status == 400:
+        return 'The AI provider rejected the request. Check the selected model and provider.'
+    if isinstance(error, (httpx.TimeoutException, asyncio.TimeoutError)) or type(error).__name__ == 'APITimeoutError':
+        return 'The AI provider timed out. Check your connection and try again.'
+    if isinstance(error, httpx.ConnectError) or type(error).__name__ == 'APIConnectionError':
+        return 'Could not connect to the AI provider. Check your internet connection.'
+    if isinstance(error, ValueError):
+        return 'The AI returned an incomplete response. Try another model or retry.'
     return 'AI matching failed. Check your API key, model access, and connection, then try again.'
 
 
@@ -119,11 +127,13 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
     report('searching', f'Found {len(jobs)} recent jobs. AI will check the newest 20 against your resume.')
     attempts = 0
     confirmed = 0
+    needs_review = 0
     client = AsyncOpenAI(api_key=api_key, timeout=60, max_retries=1) if provider == 'openai' else httpx.AsyncClient(timeout=60)
     async with client:
         async with async_playwright() as playwright:
             browser = None
             try:
+                invalid_responses = 0
                 for job in jobs[:20]:
                     if stop.is_set() or attempts >= candidate['max_applications']:
                         break
@@ -131,9 +141,18 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                     try:
                         decision = await ai_match(client, job, resume_text, candidate['role'], candidate['location'],
                                                   provider=provider, model=model, api_key=api_key, workspace_id=workspace_id)
+                    except ValueError:
+                        invalid_responses += 1
+                        needs_review += 1
+                        report('needs_attention', 'AI could not evaluate this job. You can review it manually.', job)
+                        if invalid_responses >= 3:
+                            report('error', 'AI returned several incomplete responses. Try another model or retry.')
+                            return
+                        continue
                     except Exception as exc:
                         report('error', ai_error_message(exc))
-                        break
+                        return
+                    invalid_responses = 0
                     if not decision.suitable:
                         report('skipped', 'Not a close enough match.', job)
                         continue
@@ -143,8 +162,8 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                         try:
                             browser = await playwright.chromium.launch(headless=False)
                         except Exception:
-                            report('error', 'The application browser is not installed. Restart the app using Start.command.')
-                            break
+                            report('error', 'The application browser is not installed. Restart the app using the startup file for your computer.')
+                            return
                     page = await browser.new_page()
                     try:
                         status, message = await apply_to_job(page, job, candidate, resume, ledger)
@@ -153,6 +172,8 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                     report(status, message, job)
                     if status in ('submitted', 'uncertain'):
                         attempts += 1
+                    if status in ('needs_attention', 'uncertain'):
+                        needs_review += 1
                     if status == 'submitted':
                         confirmed += 1
             finally:
@@ -161,4 +182,4 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
     if stop.is_set():
         report('stopped', 'Stopped after the current job.')
     else:
-        report('done', f'Finished. {confirmed} application(s) confirmed; {attempts - confirmed} need review.')
+        report('done', f'Finished. {confirmed} application(s) confirmed; {needs_review} need review.')

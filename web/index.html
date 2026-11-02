@@ -51,6 +51,11 @@
             <label id="custom-model-wrap" hidden>Other model name <input name="custom_model" id="custom-model" maxlength="128" placeholder="Enter a model ID" disabled></label>
             <label id="workspace-wrap" hidden>Claude workspace ID <span class="optional">only if your key requires one</span><input name="workspace_id" id="workspace-id" maxlength="128" placeholder="Optional workspace ID" disabled></label>
             <label>API key <span class="required">*</span><input name="api_key" type="password" required minlength="12" maxlength="500" autocomplete="off" placeholder="Paste your provider's key"><small><a id="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a> · API usage may incur charges. Your key stays in this tab until you refresh, close it, or change providers.</small></label>
+            <div>
+              <button type="button" id="test-ai" class="secondary">Test AI connection</button>
+              <small>Uses a small AI request that may incur a charge. No resume or application is sent.</small>
+              <p id="test-ai-result" class="notice" role="status" hidden></p>
+            </div>
             <p id="privacy-note" class="model-hint" hidden>Gemini's free tier may use submitted data to improve Google's products. Check your plan's privacy terms.</p>
           </div>
           <label class="consent"><input type="checkbox" name="consent" required><span id="consent-text">I want to apply automatically. My resume text and job preferences are sent to my selected AI provider for matching, and my resume and details are sent to employers for supported applications.</span></label>

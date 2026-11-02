@@ -1,21 +1,25 @@
 import asyncio
 import hmac
 import io
+import re
 import secrets
 import tempfile
 from pathlib import Path
 from typing import Literal
 
+import httpx
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from pypdf import PdfReader
+from openai import AsyncOpenAI
 
-from app.matching import PROVIDERS, selected_model
-from app.runner import run_hunt
+from app.matching import PROVIDERS, ai_match, selected_model
+from app.runner import ai_error_message, run_hunt
 from app.storage import ApplicationLog
+from src.models import Job
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / '.local'
@@ -57,6 +61,18 @@ def verify_token(value: str | None):
         raise HTTPException(status_code=403, detail='Refresh the page and try again.')
 
 
+def validate_ai_settings(provider, model, workspace_id, api_key):
+    try:
+        model = selected_model(provider, model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if workspace_id and not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', workspace_id):
+        raise HTTPException(status_code=400, detail='Enter a valid workspace ID.')
+    if len(api_key.strip()) < 12 or len(api_key) > 500:
+        raise HTTPException(status_code=400, detail='Enter your AI provider API key.')
+    return model
+
+
 def resume_text(content: bytes) -> str:
     if not content.startswith(b'%PDF-') or len(content) > 5_000_000:
         raise ValueError('Choose a PDF resume smaller than 5 MB.')
@@ -85,12 +101,13 @@ def report(kind, message, job=None):
 
 @app.middleware('http')
 async def local_headers(request: Request, call_next):
-    if request.method == 'POST' and request.url.path == '/api/start':
+    if request.method == 'POST' and request.url.path in ('/api/start', '/api/test-ai'):
         try:
             if 'content-length' not in request.headers:
                 return HTMLResponse('A content length is required.', status_code=411)
-            if int(request.headers['content-length']) > 5_500_000:
-                return HTMLResponse('Resume is too large.', status_code=413)
+            limit = 5_500_000 if request.url.path == '/api/start' else 10_000
+            if int(request.headers['content-length']) > limit:
+                return HTMLResponse('Request is too large.', status_code=413)
         except ValueError:
             return HTMLResponse('Invalid request.', status_code=400)
     response = await call_next(request)
@@ -125,6 +142,26 @@ async def stop(x_app_token: str | None = Header(default=None)):
     return {'message': 'Stopping after the current job.'}
 
 
+@app.post('/api/test-ai')
+async def test_ai_connection(provider: str = Form('openai'), model: str = Form(''),
+                             api_key: str = Form(...), workspace_id: str = Form(''),
+                             x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    model = validate_ai_settings(provider, model, workspace_id, api_key)
+    example = Job(source='greenhouse', source_id='connection-test', board='example', company='Example',
+                  title='Customer Support Specialist', description='Help customers with everyday questions.',
+                  location='Remote', url='https://example.invalid/job', apply_url='https://example.invalid/apply')
+    try:
+        client = AsyncOpenAI(api_key=api_key.strip(), timeout=60, max_retries=1) if provider == 'openai' else httpx.AsyncClient(timeout=60)
+        async with client:
+            await asyncio.wait_for(ai_match(client, example, 'Example experience helping customers.',
+                                            example.title, 'Remote', provider=provider, model=model,
+                                            api_key=api_key.strip(), workspace_id=workspace_id), timeout=70)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=ai_error_message(exc)) from exc
+    return {'message': 'AI connection works. No application was sent.'}
+
+
 @app.post('/api/start')
 async def start(
     first_name: str = Form(...), last_name: str = Form(...), email: str = Form(...),
@@ -144,15 +181,7 @@ async def start(
                                   role=role, location=location, region=region, max_applications=max_applications).model_dump()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail='Please check your contact details, job title, and application limit.') from exc
-        try:
-            model = selected_model(provider, model)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        import re
-        if workspace_id and not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', workspace_id):
-            raise HTTPException(status_code=400, detail='Enter a valid workspace ID.')
-        if len(api_key.strip()) < 12 or len(api_key) > 500:
-            raise HTTPException(status_code=400, detail='Enter your AI provider API key.')
+        model = validate_ai_settings(provider, model, workspace_id, api_key)
         try:
             content = await resume.read(5_000_001)
             text = resume_text(content)

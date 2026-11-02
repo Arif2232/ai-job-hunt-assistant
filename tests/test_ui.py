@@ -49,6 +49,17 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
                 'name': 'resume.pdf', 'mimeType': 'application/pdf', 'buffer': b'%PDF-test',
             })
             await page.locator('input[name="consent"]').check()
+            tested = []
+            async def fake_test(route):
+                tested.append(route.request.post_data or '')
+                await route.fulfill(status=200, content_type='application/json', body='{"message":"AI connection works. No application was sent."}')
+            await page.route('**/api/test-ai', fake_test)
+            async with page.expect_response('**/api/test-ai'):
+                await page.locator('#test-ai').click()
+            await expect(page.locator('#test-ai-result')).to_contain_text('AI connection works')
+            assert 'dummy-test-key-only' in tested[0] and 'claude-haiku-5-5' in tested[0]
+            assert all(value not in tested[0] for value in ['candidate@example.com', '1234567890', 'resume.pdf'])
+            assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
             sent = []
             async def fake_start(route):
                 sent.append(route.request.post_data or '')
@@ -59,13 +70,17 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
             await expect(page.locator('#start')).to_be_enabled()
             assert len(sent) == 1 and 'dummy-test-key-only' in sent[0]
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
+            await page.route('**/api/status', lambda route: route.fulfill(
+                status=200, content_type='application/json', body='{"running":false,"events":[{"kind":"error","message":"AI failed"}]}'))
             async with page.expect_response('**/api/start'):
                 await page.locator('#start').click()
             await expect(page.locator('#start')).to_be_enabled()
+            await expect(page.locator('#status')).to_have_text('Needs attention')
             assert len(sent) == 2 and 'dummy-test-key-only' in sent[1]
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
             await page.select_option('#provider', 'openai')
             assert await page.locator('input[name="api_key"]').input_value() == ''
+            assert await page.locator('#test-ai-result').is_hidden()
             await browser.close()
     finally:
         server.should_exit = True
