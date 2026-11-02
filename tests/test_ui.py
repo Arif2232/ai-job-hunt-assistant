@@ -63,6 +63,8 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch(tm
             await page.locator('input[name="resume_mode"][value="tailored"]').check()
             assert not await page.locator('input[name="consent"]').is_checked()
             await page.locator('input[name="remember_questions"]').uncheck()
+            await expect(page.locator('#memory-paused-note')).to_be_visible()
+            await expect(page.locator('#memory-intro')).to_contain_text('Automatic saving is off')
             await page.locator('input[name="resume"]').set_input_files({
                 'name': 'resume.pdf', 'mimeType': 'application/pdf', 'buffer': b'%PDF-test',
             })

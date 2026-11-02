@@ -46,21 +46,27 @@
             <label>Phone country and code <span class="optional">optional</span><input name="phone_country" maxlength="200" autocomplete="off" placeholder="e.g. India +91"></label>
           </div>
         </section>
-        <section id="memory-card" class="card">
-          <div class="section-head"><span class="step">✦</span><div><h2>Application memory</h2><p>Save your details and answer questions for future applications.</p></div></div>
-          <p class="memory-note">Saved on this computer without encryption. Your AI key is never saved. Answers are reused only for matching questions.</p>
-          <label class="consent"><input type="checkbox" name="remember_questions" checked><span>Remember my details and unanswered questions on this computer for next time.</span></label>
-          <small>Turning this off stops new saves; remove existing answers below if you no longer want them used.</small>
-          <div class="actions"><button type="button" id="memory-save-profile" class="secondary">Save my details</button><button type="button" id="memory-load" class="secondary">Load saved answers</button><button type="button" id="memory-clear" class="secondary">Clear saved memory</button></div>
-          <p id="memory-message" role="status">Enter your application email above to load or save answers.</p>
-          <div id="memory-questions"></div>
-          <details class="memory-add">
-            <summary>Add a question you already know</summary>
-            <p>Use the exact question wording. This answer may be reused for that same question at other employers and locations.</p>
-            <label>Question <input id="memory-new-label" maxlength="600" placeholder="e.g. LinkedIn profile"></label>
-            <label>Answer type <select id="memory-new-kind"><option value="text">Text</option><option value="choice">Dropdown or radio choice</option></select></label>
-            <label>Your answer <textarea id="memory-new-answer" rows="3" maxlength="2000"></textarea></label>
-            <button type="button" id="memory-add" class="secondary">Save this answer</button>
+        <section id="memory-card" class="card memory-card">
+          <div class="section-head"><span class="step">✦</span><div><h2>Saved answers</h2><p>A little less to fill in next time.</p></div></div>
+          <p id="memory-intro" class="memory-intro">We save your details when you search. Afterward, answer any missing questions here and we'll remember them for matching applications.</p>
+          <label class="consent"><input type="checkbox" name="remember_questions" checked><span>Automatically remember my details and questions</span></label>
+          <small id="memory-paused-note" hidden>New details and questions won't be saved automatically. Previously saved answers can still be used.</small>
+          <div class="memory-actions"><button type="button" id="memory-save-profile" class="secondary">Save my details</button><p id="memory-message" role="status"></p></div>
+          <p class="memory-note">Saved on this computer without encryption. Your AI key is never saved.</p>
+          <details id="memory-manage" class="memory-manage">
+            <summary><span>Questions &amp; saved answers</span><span id="memory-count"></span></summary>
+            <div class="memory-content">
+              <div id="memory-questions"><p class="memory-note">Enter your email above to see your answers.</p></div>
+              <details class="memory-add">
+                <summary>Add a question you already know</summary>
+                <p>Use the exact question wording. This answer may be reused for that same question at other employers and locations.</p>
+                <label>Question <input id="memory-new-label" maxlength="600" placeholder="e.g. LinkedIn profile"></label>
+                <label>Answer type <select id="memory-new-kind"><option value="text">Text answer</option><option value="choice">Option from a list</option></select></label>
+                <label>Your answer <textarea id="memory-new-answer" rows="3" maxlength="2000"></textarea></label>
+                <button type="button" id="memory-add" class="secondary">Save this answer</button>
+              </details>
+              <button type="button" id="memory-load" class="memory-refresh">Refresh answers</button>
+            </div>
           </details>
         </section>
         <section class="card">
@@ -130,7 +136,7 @@
           <div class="progress-heading"><div><p class="eyebrow">YOUR SEARCH</p><h2>What's happening</h2></div><span id="status" class="status">Ready</span></div>
           <div id="empty" class="empty"><span aria-hidden="true">✧</span><h3>Your search starts here</h3><p>Once you start, updates and application results will appear here.</p></div>
           <ul id="events" class="events"></ul>
-          <p id="memory-prompt" class="notice" hidden>Some questions need your answers. <a href="#memory-card">Answer them for next time</a></p>
+          <p id="memory-prompt" class="notice" hidden>Some questions need your attention. <a href="#memory-card">Review them for next time</a></p>
         </section>
         <div class="sidebar-note"><span aria-hidden="true">⌁</span><p><strong>You're in control.</strong><br>Your details stay on this computer until you start. You can stop after the current job.</p></div>
       </aside>

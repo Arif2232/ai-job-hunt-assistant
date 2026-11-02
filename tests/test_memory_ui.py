@@ -15,7 +15,7 @@ from src.config import Board
 from src.models import Job
 
 
-async def test_memory_can_be_loaded_edited_and_cleared_without_saving_the_ai_key(tmp_path, monkeypatch):
+async def test_saved_answers_can_be_edited_individually_without_saving_the_ai_key(tmp_path, monkeypatch):
     monkeypatch.setattr(server, 'DATA', tmp_path)
     memory = AnswerMemory(tmp_path)
     email = 'candidate@example.com'
@@ -46,6 +46,9 @@ async def test_memory_can_be_loaded_edited_and_cleared_without_saving_the_ai_key
             page.on('request', lambda request: requests.append(request.post_data or '') if '/api/memory/' in request.url else None)
             await page.goto(f'http://127.0.0.1:{port}/')
             await page.wait_for_selector('#provider option[value="openai"]', state='attached')
+            assert await page.locator('#memory-clear').count() == 0
+            assert await page.get_by_role('button', name='Clear saved memory').count() == 0
+            await expect(page.locator('#memory-manage')).not_to_have_attribute('open', '')
             await page.locator('input[name="email"]').fill(email)
             await page.locator('input[name="api_key"]').fill('dummy-ai-key-not-real')
             await expect(page.locator('input[name="first_name"]')).to_have_value('Avery')
@@ -53,6 +56,9 @@ async def test_memory_can_be_loaded_edited_and_cleared_without_saving_the_ai_key
             await expect(page.locator('#memory-prompt')).to_be_visible()
             row = page.locator('.memory-question').filter(has_text='Current country?')
             await expect(row).to_be_visible()
+            await expect(page.locator('#memory-count')).to_have_text('1 needs attention')
+            await expect(row.locator('select')).to_be_hidden()
+            await row.locator('summary').click()
             load_started = asyncio.Event()
             release_load = asyncio.Event()
             async def delayed_load(route):
@@ -70,7 +76,10 @@ async def test_memory_can_be_loaded_edited_and_cleared_without_saving_the_ai_key
             await page.unroute('**/api/memory/list', delayed_load)
             await row.locator('input[type="checkbox"]').check()
             await row.get_by_role('button', name='Save answer').click()
+            await expect(row.locator('.memory-question-status')).to_have_text('Saved')
+            await row.locator('summary').click()
             await expect(row.get_by_role('status')).to_have_text('Answer saved.')
+            await expect(row.locator('input[type="checkbox"]')).to_be_enabled()
             assert memory.questions(email)[0]['answer'] == 'India' and memory.questions(email)[0]['reuse_globally']
             await page.locator('input[name="current_city"]').fill('New Example City')
             profile_started = asyncio.Event()
@@ -95,7 +104,7 @@ async def test_memory_can_be_loaded_edited_and_cleared_without_saving_the_ai_key
             await page.locator('#memory-new-label').fill('LinkedIn profile')
             await page.locator('#memory-new-answer').fill('https://example.com/profile')
             await page.locator('#memory-add').click()
-            await expect(page.locator('#memory-questions summary')).to_contain_text('0 need attention')
+            await expect(page.locator('#memory-count')).to_have_text('2 saved')
             assert len(memory.questions(email)) == 2
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-ai-key-not-real'
             assert all('dummy-ai-key-not-real' not in request for request in requests)
@@ -105,18 +114,20 @@ async def test_memory_can_be_loaded_edited_and_cleared_without_saving_the_ai_key
             await second.locator('input[name="phone"]').click()
             await expect(second.locator('input[name="current_city"]')).to_have_value('Latest Example City')
             assert len(memory.questions(email)) == 2
+            await second.locator('#memory-manage > summary').click()
             await second.locator('#memory-load').click()
-            await expect(second.locator('#memory-message')).to_contain_text('ready')
+            await expect(second.locator('#memory-message')).to_contain_text('up to date')
             await second.locator('input[name="email"]').fill('other@example.com')
             await expect(second.locator('input[name="first_name"]')).to_have_value('')
             await expect(second.locator('input[name="current_city"]')).to_have_value('')
             await second.locator('#memory-save-profile').click()
             await expect(second.locator('#memory-message')).to_contain_text('Select “Save my details”')
             assert memory.profile('other@example.com')['current_city'] == 'Other City'
-            page.on('dialog', lambda dialog: asyncio.create_task(dialog.accept()))
-            await page.locator('#memory-clear').click()
-            await expect(page.locator('#memory-message')).to_contain_text('removed')
-            assert memory.profile(email) == {} and memory.questions(email) == []
+            await row.locator('summary').click()
+            await row.get_by_role('button', name='Remove').click()
+            await expect(page.locator('#memory-count')).to_have_text('1 saved')
+            assert memory.profile(email)['current_city'] == 'Latest Example City'
+            assert [item['label'] for item in memory.questions(email)] == ['LinkedIn profile']
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-ai-key-not-real'
             await browser.close()
     finally:
@@ -175,6 +186,10 @@ async def test_new_questions_are_shown_when_a_search_finishes(tmp_path, monkeypa
             await expect(page.locator('#start')).to_be_enabled()
             await page.locator('#start').click()
             await expect(page.locator('#memory-prompt')).to_be_visible(timeout=10000)
+            await expect(page.locator('#memory-manage')).to_have_attribute('open', '')
+            await page.locator('#memory-manage > summary').click()
+            await page.locator('#memory-prompt a').click()
+            await expect(page.locator('#memory-manage')).to_have_attribute('open', '')
             await expect(page.locator('.memory-question').filter(has_text='Notice period?')).to_be_visible()
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-ai-key-not-real'
             await browser.close()
@@ -278,9 +293,10 @@ async def test_saved_answer_is_used_on_the_next_search_end_to_end(tmp_path, monk
                 await page.locator('#review-approve').click()
             await expect(page.locator('#memory-prompt')).to_be_visible(timeout=15000)
             row = page.locator('.memory-question').filter(has_text='Country of residence?')
+            await row.locator('summary').click()
             await row.locator('select').select_option('India')
             await row.get_by_role('button', name='Save answer').click()
-            await expect(row.get_by_role('status')).to_have_text('Answer saved.')
+            await expect(row.locator('.memory-question-status')).to_have_text('Saved')
             await expect(page.locator('#start')).to_be_enabled()
             await page.locator('#start').click()
             if mode == 'review':

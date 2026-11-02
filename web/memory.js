@@ -5,6 +5,11 @@
   const message = document.getElementById('memory-message');
   const container = document.getElementById('memory-questions');
   const prompt = document.getElementById('memory-prompt');
+  const manager = document.getElementById('memory-manage');
+  const countLabel = document.getElementById('memory-count');
+  const remember = form.elements.remember_questions;
+  const pausedNote = document.getElementById('memory-paused-note');
+  const intro = document.getElementById('memory-intro');
   const profileFields = ['first_name', 'last_name', 'phone', 'current_city', 'current_country', 'preferred_first_name', 'phone_country'];
   const dirty = new Set();
   let loadedEmail = '';
@@ -12,7 +17,6 @@
   let requestVersion = 0;
   let editVersion = 0;
   let questions = [];
-  let pendingSummary = null;
   let loadedProfileValues = {};
 
   function emailKey(value) { return value.trim().toLowerCase(); }
@@ -38,19 +42,26 @@
     return result;
   }
   function updatePending() {
-    const count = questions.filter(item => item.pending).length;
-    prompt.hidden = count === 0 || !loadedEmail || emailKey(emailField.value) !== loadedEmail;
-    if (pendingSummary) pendingSummary.textContent = `Questions and saved answers (${count} need attention)`;
+    const current = loadedEmail && emailKey(emailField.value) === loadedEmail;
+    const count = current ? questions.filter(item => item.pending).length : 0;
+    prompt.hidden = !count;
+    countLabel.textContent = count ? `${count} ${count === 1 ? 'needs' : 'need'} attention` : current && questions.length ? `${questions.length} saved` : '';
   }
   function questionRow(item, email) {
-    const row = document.createElement('div');
+    const row = document.createElement('details');
     row.className = 'memory-question';
-    const title = document.createElement('h3');
+    const summary = document.createElement('summary');
+    const description = document.createElement('span');
+    const title = document.createElement('span');
     title.textContent = item.label;
-    row.append(title);
-    const context = document.createElement('p');
-    context.textContent = item.company ? [item.company, item.title, item.location].filter(Boolean).join(' · ') : 'For the same question at any employer';
-    row.append(context);
+    const context = document.createElement('small');
+    context.textContent = item.company ? [item.company, item.title, item.location].filter(Boolean).join(' · ') : 'For any employer';
+    description.append(title, context);
+    const state = document.createElement('span');
+    state.className = 'memory-question-status';
+    state.textContent = item.pending ? (item.kind === 'manual' ? 'Review' : 'Needs answer') : 'Saved';
+    summary.append(description, state);
+    row.append(summary);
     const url = safeJobUrl(item.url);
     if (url) {
       const link = document.createElement('a');
@@ -63,7 +74,7 @@
     const rowMessage = document.createElement('p');
     rowMessage.setAttribute('role', 'status');
     rowMessage.textContent = item.pending ? 'Needs your answer or review.' : 'Saved for next time.';
-    let answer, reuse;
+    let answer, reuse, reuseLocked;
     if (item.kind === 'manual') {
       rowMessage.textContent = 'Complete this directly on the employer’s form.';
     } else {
@@ -89,16 +100,18 @@
       reuse.type = 'checkbox';
       reuse.checked = item.reuse_globally;
       reuse.disabled = !item.can_reuse_globally || !item.company;
-      const reuseLocked = reuse.disabled;
-      const reuseText = document.createElement('span');
-      reuseText.textContent = !item.company ? 'This answer is used for the same question at any employer.' :
-        item.can_reuse_globally ? 'Also use for this exact question at other employers and locations.' :
-        'This answer depends on the job or location and stays limited to this job.';
-      reuseLabel.append(reuse, reuseText);
-      row.append(reuseLabel);
-      if (item.company && item.can_reuse_globally) {
+      reuseLocked = reuse.disabled;
+      if (!reuseLocked) {
+        const reuseText = document.createElement('span');
+        reuseText.textContent = 'Use this answer for the same question at other employers.';
+        reuseLabel.append(reuse, reuseText);
+        row.append(reuseLabel);
         const scope = document.createElement('small');
-        scope.textContent = 'Otherwise, this answer is used only at this employer and location.';
+        scope.textContent = 'Otherwise, it stays with this employer and location.';
+        row.append(scope);
+      } else {
+        const scope = document.createElement('small');
+        scope.textContent = item.company ? 'This answer is saved for this job only.' : 'Used for the same question at other employers.';
         row.append(scope);
       }
       const changed = () => { dirty.add(item.id); editVersion++; };
@@ -126,8 +139,10 @@
           item.reuse_globally = reuse.checked;
           item.pending = false;
           dirty.delete(item.id);
+          state.textContent = 'Saved';
           forget.textContent = 'Remove';
           rowMessage.textContent = result.message;
+          row.open = false;
           updatePending();
         } catch (err) { rowMessage.textContent = err.message || 'Could not save this answer.'; }
         finally { save.disabled = false; answer.disabled = false; reuse.disabled = reuseLocked; }
@@ -148,7 +163,8 @@
         questions = questions.filter(question => question.id !== item.id);
         dirty.delete(item.id);
         row.remove();
-        updatePending();
+        if (questions.length) updatePending();
+        else render([], email);
       } catch (err) { rowMessage.textContent = err.message || 'Could not remove this answer.'; }
       finally { forget.disabled = false; }
     });
@@ -160,20 +176,11 @@
     questions = items;
     dirty.clear();
     container.replaceChildren();
-    pendingSummary = null;
-    if (items.length) {
-      const group = document.createElement('details');
-      group.open = items.some(item => item.pending);
-      const summary = document.createElement('summary');
-      pendingSummary = summary;
-      group.append(summary);
-      for (const item of items) group.append(questionRow(item, email));
-      container.append(group);
-    }
+    for (const item of items) container.append(questionRow(item, email));
     if (!items.length) {
       const empty = document.createElement('p');
       empty.className = 'memory-note';
-      empty.textContent = 'No saved answers or unanswered questions yet.';
+      empty.textContent = 'No questions yet. We’ll show them here after your search.';
       container.append(empty);
     }
     updatePending();
@@ -182,15 +189,15 @@
     const email = currentEmail(!automatic);
     if (!email) return;
     if (dirty.size) {
-      if (automatic) return setMessage(emailKey(email) !== loadedEmail ? 'Return to the previous email to save edits, or load memory to discard them.' : 'Save your edited answers, then load memory to see any new questions.');
-      if (!window.confirm('Discard unsaved answer edits and reload memory?')) return;
+      if (automatic) return setMessage(emailKey(email) !== loadedEmail ? 'Return to the previous email to save edits, or refresh answers to discard them.' : 'Save your edited answers, then refresh to see new questions.');
+      if (!window.confirm('Discard unsaved answer edits and refresh?')) return;
     }
     const version = ++requestVersion;
     const edits = editVersion;
     try {
       const result = await post('/api/memory/list', { email });
       if (version !== requestVersion || emailKey(emailField.value) !== emailKey(email)) return;
-      if (edits !== editVersion) return setMessage('Save your edited answers, then load memory to see any new questions.');
+      if (edits !== editVersion) return setMessage('Save your edited answers, then refresh to see new questions.');
       const previousProfile = loadedEmail === emailKey(email) ? loadedProfileValues : {};
       loadedEmail = emailKey(email);
       container.hidden = false;
@@ -206,7 +213,8 @@
         profileLoadedEmail = emailKey(email);
       }
       render(result.questions, email);
-      setMessage(result.questions.some(item => item.pending) ? 'Some questions need your answers for next time.' : 'Your saved memory is ready.');
+      if (result.questions.some(item => item.pending)) manager.open = true;
+      setMessage(automatic ? '' : 'Your saved answers are up to date.');
     } catch (err) {
       if (version === requestVersion) setMessage(err.message || 'Could not load saved answers.', true);
     }
@@ -224,12 +232,21 @@
     updatePending();
   });
   emailField.addEventListener('change', () => { if (emailKey(emailField.value) !== loadedEmail) loadMemory({ automatic: true }); });
+  function updateRemember() {
+    pausedNote.hidden = remember.checked;
+    intro.textContent = remember.checked ?
+      "We save your details when you search. Afterward, answer any missing questions here and we'll remember them for matching applications." :
+      'Automatic saving is off. You can still save your details or add answers below.';
+  }
+  remember.addEventListener('change', updateRemember);
+  updateRemember();
+  document.querySelectorAll('a[href="#memory-card"]').forEach(link => link.addEventListener('click', () => { manager.open = true; }));
   document.getElementById('memory-load').addEventListener('click', () => loadMemory());
   document.getElementById('memory-save-profile').addEventListener('click', async () => {
     const email = currentEmail();
     if (!email) return;
     if (profileLoadedEmail !== emailKey(email)) {
-      setMessage('Load saved answers first, then save your details.');
+      setMessage('Checking your saved details…');
       await loadMemory();
       if (profileLoadedEmail === emailKey(email)) setMessage('Saved details are loaded. Select “Save my details” to store your changes.');
       return;
@@ -245,19 +262,6 @@
       }
     } catch (err) { setMessage(err.message || 'Could not save your details.', true); }
   });
-  document.getElementById('memory-clear').addEventListener('click', async () => {
-    const email = currentEmail();
-    if (!email || !window.confirm('Delete saved details and answers for this email? Application history will be kept.')) return;
-    requestVersion++;
-    try {
-      const result = await post('/api/memory/clear', { email });
-      if (emailKey(emailField.value) !== emailKey(email)) return;
-      loadedEmail = emailKey(email);
-      container.hidden = false;
-      render([], email);
-      setMessage(result.message);
-    } catch (err) { setMessage(err.message || 'Could not clear saved memory.', true); }
-  });
   document.getElementById('memory-add').addEventListener('click', async () => {
     const email = currentEmail();
     if (!email) return;
@@ -270,7 +274,7 @@
       if (emailKey(emailField.value) !== emailKey(email)) return;
       label.value = '';
       answer.value = '';
-      if (dirty.size) setMessage(`${result.message} Save other edits, then load memory to see it.`);
+      if (dirty.size) setMessage(`${result.message} Save other edits, then refresh to see it.`);
       else await loadMemory({ fillProfile: false, automatic: true });
     } catch (err) { setMessage(err.message || 'Could not save this answer.', true); }
   });
