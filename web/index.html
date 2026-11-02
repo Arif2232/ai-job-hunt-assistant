@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="app-token" content="__APP_TOKEN__">
+  <meta name="theme-color" content="#f7f6f2">
+  <title>Job Hunt Assistant</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-icon" aria-hidden="true">✦</span> Job Hunt Assistant</a>
+    <span class="local-badge"><span aria-hidden="true"></span> Your personal workspace</span>
+  </header>
+  <main class="page">
+    <section class="intro">
+      <p class="eyebrow">A LITTLE HELP WITH THE BIG SEARCH</p>
+      <h1>Let's find your<br><em>next opportunity.</em></h1>
+      <p>Tell us what you're looking for. We'll search, check your fit, and apply to supported jobs for you.</p>
+    </section>
+    <div class="layout">
+      <form id="setup" class="setup" novalidate>
+        <section class="card">
+          <div class="section-head"><span class="step">01</span><div><h2>What are you looking for?</h2><p>Start with the kind of work you want.</p></div></div>
+          <div class="fields two">
+            <label>Job title <span class="required">*</span><input name="role" required maxlength="100" placeholder="e.g. Marketing Manager" autocomplete="off"></label>
+            <label>Location <span class="optional">optional</span><input name="location" maxlength="100" placeholder="e.g. Remote or Bengaluru" autocomplete="address-level2"></label>
+            <label>Search area <select name="region"><option value="india">India and worldwide remote</option><option value="anywhere">Anywhere</option></select></label>
+          </div>
+        </section>
+        <section class="card">
+          <div class="section-head"><span class="step">02</span><div><h2>Your details</h2><p>We'll use these only for applications you start.</p></div></div>
+          <div class="fields two">
+            <label>First name <span class="required">*</span><input name="first_name" required maxlength="100" autocomplete="given-name" placeholder="First name"></label>
+            <label>Last name <span class="required">*</span><input name="last_name" required maxlength="100" autocomplete="family-name" placeholder="Last name"></label>
+            <label>Email <span class="required">*</span><input name="email" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com"></label>
+            <label>Phone <span class="required">*</span><input name="phone" type="tel" required minlength="5" maxlength="40" autocomplete="tel" placeholder="Your phone number"></label>
+          </div>
+        </section>
+        <section class="card">
+          <div class="section-head"><span class="step">03</span><div><h2>Your resume and AI</h2><p>Help us check which jobs are a good fit.</p></div></div>
+          <div class="fields">
+            <label>Resume <span class="required">*</span><input name="resume" type="file" accept="application/pdf,.pdf" required><small>PDF with selectable text, up to 5 MB.</small></label>
+            <div class="fields two">
+              <label>AI provider <select name="provider" id="provider" required><option value="">Loading options…</option></select></label>
+              <label>Model <select name="model" id="model" required><option value="">Choose a provider</option></select></label>
+            </div>
+            <p id="model-price" class="model-hint"></p>
+            <label id="custom-model-wrap" hidden>Other model name <input name="custom_model" id="custom-model" maxlength="128" placeholder="Enter a model ID" disabled></label>
+            <label id="workspace-wrap" hidden>Claude workspace ID <span class="optional">only if your key requires one</span><input name="workspace_id" id="workspace-id" maxlength="128" placeholder="Optional workspace ID" disabled></label>
+            <label>API key <span class="required">*</span><input name="api_key" type="password" required minlength="12" maxlength="500" autocomplete="off" placeholder="Paste your provider's key"><small><a id="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a> · API usage may incur charges. Your key stays in this tab until you refresh, close it, or change providers.</small></label>
+            <p id="privacy-note" class="model-hint" hidden>Gemini's free tier may use submitted data to improve Google's products. Check your plan's privacy terms.</p>
+          </div>
+          <label class="consent"><input type="checkbox" name="consent" required><span id="consent-text">I want to apply automatically. My resume text and job preferences are sent to my selected AI provider for matching, and my resume and details are sent to employers for supported applications.</span></label>
+          <p class="notice">Each search attempts up to 10 applications, starting with the newest jobs from the past 30 days with a verified posting date. Only simple, supported forms are submitted; other forms are skipped for your review.</p>
+          <p id="error" class="error" role="alert" hidden></p>
+          <div class="actions"><button type="submit" id="start">Find and apply <span aria-hidden="true">↗</span></button><button type="button" id="stop" class="secondary" hidden>Stop after current job</button></div>
+        </section>
+      </form>
+      <aside class="sidebar">
+        <section class="progress-card" aria-live="polite">
+          <div class="progress-heading"><div><p class="eyebrow">YOUR SEARCH</p><h2>What's happening</h2></div><span id="status" class="status">Ready</span></div>
+          <div id="empty" class="empty"><span aria-hidden="true">✧</span><h3>Your search starts here</h3><p>Once you start, updates and application results will appear here.</p></div>
+          <ul id="events" class="events"></ul>
+        </section>
+        <div class="sidebar-note"><span aria-hidden="true">⌁</span><p><strong>You're in control.</strong><br>Your details stay on this computer until you start. You can stop after the current job.</p></div>
+      </aside>
+    </div>
+    <footer>Made to make the job hunt feel a little lighter. <span>✦</span></footer>
+  </main>
+</body>
+</html>

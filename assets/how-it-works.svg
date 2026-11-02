@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" role="img" aria-labelledby="title desc">
+  <title id="title">A simpler job search</title>
+  <desc id="desc">Find recent roles, check the fit, apply where supported, and review the results.</desc>
+  <rect width="1200" height="340" rx="24" fill="#f3f6f0"/>
+  <text x="48" y="54" fill="#688778" font-family="Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="2">JOB HUNT ASSISTANT</text>
+  <text x="48" y="104" fill="#24352d" font-family="Arial,sans-serif" font-size="36" font-weight="700">From search to next step.</text>
+  <text x="49" y="132" fill="#718379" font-family="Arial,sans-serif" font-size="16">A calmer way to move your job search forward.</text>
+  <g font-family="Arial,sans-serif">
+    <rect x="48" y="171" width="255" height="116" rx="16" fill="#fff" stroke="#dce7dd"/>
+    <text x="69" y="203" fill="#83a991" font-size="12" font-weight="700">01</text>
+    <text x="69" y="234" fill="#2b4436" font-size="21" font-weight="700">Discover</text>
+    <text x="69" y="260" fill="#778c7e" font-size="14">Find recent opportunities</text>
+    <rect x="331" y="171" width="255" height="116" rx="16" fill="#fff" stroke="#dce7dd"/>
+    <text x="352" y="203" fill="#83a991" font-size="12" font-weight="700">02</text>
+    <text x="352" y="234" fill="#2b4436" font-size="21" font-weight="700">Match</text>
+    <text x="352" y="260" fill="#778c7e" font-size="14">Check the fit with AI</text>
+    <rect x="614" y="171" width="255" height="116" rx="16" fill="#fff" stroke="#dce7dd"/>
+    <text x="635" y="203" fill="#83a991" font-size="12" font-weight="700">03</text>
+    <text x="635" y="234" fill="#2b4436" font-size="21" font-weight="700">Apply</text>
+    <text x="635" y="260" fill="#778c7e" font-size="14">Submit supported forms</text>
+    <rect x="897" y="171" width="255" height="116" rx="16" fill="#fff" stroke="#dce7dd"/>
+    <text x="918" y="203" fill="#83a991" font-size="12" font-weight="700">04</text>
+    <text x="918" y="234" fill="#2b4436" font-size="21" font-weight="700">Review</text>
+    <text x="918" y="260" fill="#778c7e" font-size="14">See what needs your help</text>
+  </g>
+  <g fill="#9fb9a6" font-family="Arial,sans-serif" font-size="20"><text x="310" y="236">›</text><text x="593" y="236">›</text><text x="876" y="236">›</text></g>
+</svg>
