@@ -61,7 +61,7 @@ async function status() {
       const message = document.createElement('p');
       message.textContent = item.message;
       body.append(message);
-      if (item.url && ['needs_attention', 'uncertain'].includes(item.kind)) {
+      if (item.url && ['needs_attention', 'uncertain', 'skipped'].includes(item.kind)) {
         try {
           const url = new URL(item.url);
           if (url.protocol === 'https:' && ['boards.greenhouse.io', 'job-boards.greenhouse.io', 'boards.eu.greenhouse.io', 'job-boards.eu.greenhouse.io', 'jobs.lever.co', 'jobs.eu.lever.co', 'jobs.ashbyhq.com'].includes(url.hostname)) {

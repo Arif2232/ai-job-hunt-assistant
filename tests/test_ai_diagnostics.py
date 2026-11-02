@@ -164,3 +164,16 @@ async def test_search_caps_ai_checks(isolated_hunt, monkeypatch):
                           isolated_hunt['ledger'], lambda *args: events.append(args), asyncio.Event())
     assert len(checked) == 100
     assert any(event[0] == 'searching' and 'newest 100' in event[1] for event in events)
+
+
+@pytest.mark.parametrize('region,location', [('india', 'India and worldwide remote'), ('anywhere', 'Anywhere')])
+async def test_ai_receives_the_selected_search_area_when_no_location_is_entered(isolated_hunt, monkeypatch, region, location):
+    seen = []
+    async def match(client, item, resume, role, requested_location, **kwargs):
+        seen.append(requested_location)
+        return Decision(suitable=False, reason='Example reason')
+    isolated_hunt['candidate']['region'] = region
+    monkeypatch.setattr(runner, 'ai_match', match)
+    await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
+                          isolated_hunt['ledger'], lambda *args: None, asyncio.Event())
+    assert seen and all(value == location for value in seen)

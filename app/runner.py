@@ -137,6 +137,7 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
     attempts = 0
     confirmed = 0
     needs_review = 0
+    requested_location = candidate['location'] or ('India and worldwide remote' if candidate.get('region', 'india') == 'india' else 'Anywhere')
     client = AsyncOpenAI(api_key=api_key, timeout=60, max_retries=1) if provider == 'openai' else httpx.AsyncClient(timeout=60)
     async with client:
         async with async_playwright() as playwright:
@@ -148,7 +149,7 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                         break
                     report('reviewing', f'Checking {job.title} at {job.company}.', job)
                     try:
-                        decision = await ai_match(client, job, resume_text, candidate['role'], candidate['location'],
+                        decision = await ai_match(client, job, resume_text, candidate['role'], requested_location,
                                                   provider=provider, model=model, api_key=api_key, workspace_id=workspace_id)
                     except ValueError as exc:
                         invalid_responses += 1

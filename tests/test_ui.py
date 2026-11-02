@@ -73,11 +73,12 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
             assert len(sent) == 1 and 'dummy-test-key-only' in sent[0]
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
             await page.route('**/api/status', lambda route: route.fulfill(
-                status=200, content_type='application/json', body='{"running":false,"events":[{"kind":"error","message":"AI failed"}]}'))
+                status=200, content_type='application/json', body='{"running":false,"events":[{"kind":"skipped","message":"Not a close match","url":"https://job-boards.greenhouse.io/example/jobs/123"},{"kind":"error","message":"AI failed"}]}'))
             async with page.expect_response('**/api/start'):
                 await page.locator('#start').click()
             await expect(page.locator('#start')).to_be_enabled()
             await expect(page.locator('#status')).to_have_text('Needs attention')
+            await expect(page.get_by_role('link', name='Open job ↗')).to_have_attribute('href', 'https://job-boards.greenhouse.io/example/jobs/123')
             assert len(sent) == 2 and 'dummy-test-key-only' in sent[1]
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
             await page.select_option('#provider', 'openai')
