@@ -19,7 +19,7 @@ def item(identifier):
 
 
 @pytest.mark.parametrize('apply_status', ['submitted', 'uncertain'])
-@pytest.mark.parametrize('limit', [1, 10])
+@pytest.mark.parametrize('limit', [1, 5, 10])
 async def test_run_skips_unsuitable_jobs_and_stops_after_application_limit(tmp_path, monkeypatch, apply_status, limit):
     monkeypatch.setattr(runner, 'SOURCES', {'greenhouse': [Board(name='Example', board='example')]})
     calls = []

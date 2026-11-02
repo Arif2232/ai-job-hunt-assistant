@@ -8,7 +8,7 @@ from pypdf import PdfWriter
 
 from app import server
 from app.apply import matches_job, preflight
-from app.matching import Decision, ai_match
+from app.matching import Decision, ai_match, selected_model
 from app.storage import ApplicationLog
 from src.models import Job
 
@@ -19,6 +19,12 @@ def job(**updates):
                   url='https://job-boards.greenhouse.io/example/jobs/123',
                   apply_url='https://job-boards.greenhouse.io/example/jobs/123')
     return Job(**(values | updates))
+
+
+def verify_settings(form):
+    provider = form.get('provider', 'openai')
+    model = selected_model(provider, form.get('model', ''))
+    form['connection_ticket'] = server.make_connection_ticket(provider, model, form.get('workspace_id', ''), form['api_key'])
 
 
 def test_form_validation_refuses_unknown_required_questions():
@@ -91,6 +97,7 @@ def test_local_interface_checks_token_and_consent_without_sending_anything(tmp_p
     form = {'first_name': 'Avery', 'last_name': 'Example', 'email': 'candidate@example.com',
             'phone': '1234567890', 'role': 'Manager', 'location': 'Remote',
             'max_applications': '1', 'api_key': 'test-api-key-not-real', 'consent': 'true'}
+    verify_settings(form)
     files = {'resume': ('resume.pdf', b'%PDF-test', 'application/pdf')}
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
         assert client.get('/api/status').status_code == 403
@@ -119,7 +126,8 @@ def test_search_preferences_are_validated_and_reach_the_runner(tmp_path, monkeyp
     server.state.update({'task': None, 'events': []})
     form = {'first_name': 'Avery', 'last_name': 'Example', 'email': 'candidate@example.com',
             'phone': '1234567890', 'role': 'Engineer', 'api_key': 'test-api-key-not-real', 'consent': 'true',
-            'relocation': 'india', 'experience_flexibility': 'one_year'}
+            'relocation': 'india', 'experience_flexibility': 'one_year', 'resume_mode': 'tailored'}
+    verify_settings(form)
     files = {'resume': ('resume.pdf', b'%PDF-test', 'application/pdf')}
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
         bad = client.post('/api/start', headers={'X-App-Token': server.TOKEN},
@@ -128,10 +136,14 @@ def test_search_preferences_are_validated_and_reach_the_runner(tmp_path, monkeyp
         bad = client.post('/api/start', headers={'X-App-Token': server.TOKEN},
                           data=dict(form, experience_flexibility='invalid'), files=files)
         assert bad.status_code == 400 and not calls
+        bad = client.post('/api/start', headers={'X-App-Token': server.TOKEN},
+                          data=dict(form, resume_mode='invalid'), files=files)
+        assert bad.status_code == 400 and not calls
         response = client.post('/api/start', headers={'X-App-Token': server.TOKEN}, data=form, files=files)
         assert response.status_code == 200
         client.get('/api/status', headers={'X-App-Token': server.TOKEN})
     assert calls[0]['relocation'] == 'india' and calls[0]['experience_flexibility'] == 'one_year'
+    assert calls[0]['resume_mode'] == 'tailored'
 
 
 @pytest.mark.parametrize('provider,model', [
@@ -150,6 +162,7 @@ def test_provider_and_model_flow_from_form_to_runner(provider, model, tmp_path, 
             'phone': '1234567890', 'role': 'Manager', 'location': '', 'region': 'india',
             'max_applications': '1', 'api_key': 'test-api-key-not-real', 'consent': 'true',
             'provider': provider, 'model': model}
+    verify_settings(form)
     files = {'resume': ('resume.pdf', b'%PDF-test', 'application/pdf')}
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
         options = client.get('/api/options', headers={'X-App-Token': server.TOKEN})
@@ -223,6 +236,7 @@ def test_application_limit_is_enforced_at_the_api(limit, expected, tmp_path, mon
     form = {'first_name': 'Avery', 'last_name': 'Example', 'email': 'candidate@example.com',
             'phone': '1234567890', 'role': 'Manager',
             'api_key': 'test-api-key-not-real', 'consent': 'true'}
+    verify_settings(form)
     if limit is not None:
         form['max_applications'] = limit
     files = {'resume': ('resume.pdf', b'%PDF-test', 'application/pdf')}
@@ -230,7 +244,7 @@ def test_application_limit_is_enforced_at_the_api(limit, expected, tmp_path, mon
         response = client.post('/api/start', headers={'X-App-Token': server.TOKEN}, data=form, files=files)
         assert response.status_code == expected
         client.get('/api/status', headers={'X-App-Token': server.TOKEN})
-    assert calls == ([10 if limit is None else int(limit)] if expected == 200 else [])
+    assert calls == ([5 if limit is None else int(limit)] if expected == 200 else [])
 
 
 def test_resume_file_is_removed_if_permissions_cannot_be_set(tmp_path, monkeypatch):
@@ -245,6 +259,7 @@ def test_resume_file_is_removed_if_permissions_cannot_be_set(tmp_path, monkeypat
     server.state.update({'task': None, 'events': []})
     form = {'first_name': 'Avery', 'last_name': 'Example', 'email': 'candidate@example.com',
             'phone': '1234567890', 'role': 'Manager', 'api_key': 'test-api-key-not-real', 'consent': 'true'}
+    verify_settings(form)
     files = {'resume': ('resume.pdf', b'%PDF-test', 'application/pdf')}
     with TestClient(server.app, base_url='http://127.0.0.1', raise_server_exceptions=False) as client:
         response = client.post('/api/start', headers={'X-App-Token': server.TOKEN}, data=form, files=files)

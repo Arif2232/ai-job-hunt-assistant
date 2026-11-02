@@ -18,9 +18,24 @@ const consentText = document.getElementById('consent-text');
 const privacyNote = document.getElementById('privacy-note');
 const testAI = document.getElementById('test-ai');
 const testResult = document.getElementById('test-ai-result');
+const draftButton = document.getElementById('draft-button');
+const draftMessage = document.getElementById('draft-message');
+const draftWrap = document.getElementById('draft-wrap');
+const jobDescription = document.getElementById('job-description');
+const draftResume = document.getElementById('draft-resume');
+const missingSkills = document.getElementById('missing-skills');
 let providers = {};
 let lastEvents = '';
 let settingsVersion = 0;
+let connectionTicket = '';
+let searchRunning = false;
+let starting = false;
+let draftBusy = false;
+
+function updateStart() {
+  start.disabled = searchRunning || starting || !connectionTicket;
+  draftButton.disabled = draftBusy || !connectionTicket;
+}
 
 function showError(message) {
   error.textContent = message;
@@ -32,7 +47,8 @@ async function status() {
     const response = await fetch('/api/status', { headers: { 'X-App-Token': token } });
     if (!response.ok) throw new Error();
     const data = await response.json();
-    start.disabled = data.running;
+    searchRunning = data.running;
+    updateStart();
     stop.hidden = !data.running;
     if (!data.running) stop.textContent = 'Stop after current job';
     const lastKind = data.events.at(-1)?.kind;
@@ -133,13 +149,19 @@ async function loadOptions() {
 
 function clearTestResult() {
   settingsVersion++;
+  connectionTicket = '';
+  updateStart();
   testResult.hidden = true;
   testResult.textContent = '';
+  testResult.className = 'notice';
 }
 
 provider.addEventListener('change', () => { clearTestResult(); updateProvider(); });
 model.addEventListener('change', () => { clearTestResult(); updateModel(); });
-for (const field of [form.elements.api_key, customModel, workspace]) field.addEventListener('input', clearTestResult);
+for (const field of [form.elements.api_key, customModel, workspace]) {
+  field.addEventListener('input', clearTestResult);
+  field.addEventListener('change', clearTestResult);
+}
 
 testAI.addEventListener('click', async () => {
   clearTestResult();
@@ -157,29 +179,94 @@ testAI.addEventListener('click', async () => {
     const response = await fetch('/api/test-ai', { method: 'POST', headers: { 'X-App-Token': token }, body: data });
     const result = await response.json();
     if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Could not test the connection.');
-    if (version === settingsVersion) testResult.textContent = result.message;
+    if (version === settingsVersion) {
+      connectionTicket = result.verification || '';
+      if (!connectionTicket) throw new Error('Connection test did not finish. Please try again.');
+      testResult.textContent = result.message;
+      updateStart();
+    }
   } catch (err) {
-    if (version === settingsVersion) testResult.textContent = err.message || 'Could not test the connection.';
+    if (version === settingsVersion) {
+      testResult.className = 'error';
+      testResult.textContent = err instanceof TypeError || err instanceof SyntaxError ? 'Connection failed. Check your internet and try again.' : err.message || 'Connection failed. Please try again.';
+    }
   } finally {
     testAI.disabled = false;
   }
 });
 
+draftButton.addEventListener('click', async () => {
+  if (!connectionTicket || !form.elements.resume.reportValidity()) return;
+  const description = jobDescription.value.trim();
+  if (description.length < 20) {
+    draftMessage.hidden = false;
+    draftMessage.className = 'error';
+    draftMessage.textContent = 'Paste a longer job description first.';
+    return;
+  }
+  const version = settingsVersion;
+  const resume = form.elements.resume.files[0];
+  const data = new FormData();
+  data.set('provider', provider.value);
+  data.set('model', model.value === 'custom' ? customModel.value.trim() : model.value);
+  data.set('api_key', form.elements.api_key.value);
+  data.set('workspace_id', workspace.disabled ? '' : workspace.value.trim());
+  data.set('connection_ticket', connectionTicket);
+  data.set('resume', resume);
+  data.set('description', description);
+  draftBusy = true;
+  updateStart();
+  draftMessage.hidden = false;
+  draftMessage.className = 'notice';
+  draftMessage.textContent = 'Creating your draft…';
+  try {
+    const response = await fetch('/api/tailor-resume', { method: 'POST', headers: { 'X-App-Token': token }, body: data });
+    const result = await response.json();
+    if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Could not create the draft.');
+    if (version !== settingsVersion || resume !== form.elements.resume.files[0] || description !== jobDescription.value.trim()) {
+      throw new Error('Your settings changed. Generate the draft again.');
+    }
+    draftResume.value = result.resume;
+    missingSkills.textContent = result.missing_skills.length ? `Skills to check: ${result.missing_skills.join(', ')}. Add them only if you have them.` : 'No missing skills were suggested.';
+    draftWrap.hidden = false;
+    draftMessage.textContent = 'Draft ready. Review and edit it before saving.';
+  } catch (err) {
+    draftMessage.className = 'error';
+    draftMessage.textContent = err instanceof TypeError || err instanceof SyntaxError ? 'Could not create the draft. Check your connection and try again.' : err.message || 'Could not create the draft.';
+  } finally {
+    draftBusy = false;
+    updateStart();
+  }
+});
+
+document.getElementById('print-draft').addEventListener('click', () => {
+  document.getElementById('print-resume').textContent = draftResume.value;
+  window.print();
+});
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   showError('');
-  if (!form.reportValidity()) return;
-  start.disabled = true;
+  if (!connectionTicket || !form.reportValidity()) return;
+  starting = true;
+  updateStart();
   try {
     const data = new FormData(form);
     if (model.value === 'custom') data.set('model', customModel.value.trim());
+    if (!workspace.disabled) data.set('workspace_id', workspace.value.trim());
+    data.set('connection_ticket', connectionTicket);
     const response = await fetch('/api/start', { method: 'POST', headers: { 'X-App-Token': token }, body: data });
     const result = await response.json();
-    if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Please check the form and try again.');
+    if (!response.ok) {
+      if (typeof result.detail === 'string' && result.detail.startsWith('Test your AI connection')) clearTestResult();
+      throw new Error(typeof result.detail === 'string' ? result.detail : 'Please check the form and try again.');
+    }
     await status();
   } catch (err) {
     showError(err.message || 'Could not start the search.');
-    start.disabled = false;
+  } finally {
+    starting = false;
+    updateStart();
   }
 });
 

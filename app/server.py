@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import hmac
 import io
+import json
 import re
 import secrets
 import tempfile
@@ -19,12 +21,14 @@ from openai import AsyncOpenAI
 from app.matching import PROVIDERS, ai_match, selected_model
 from app.runner import ai_error_message, run_hunt
 from app.storage import ApplicationLog
+from app.tailoring import resume_draft
 from src.models import Job
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / '.local'
 WEB = ROOT / 'web'
 TOKEN = secrets.token_urlsafe(32)
+CONNECTION_SECRET = secrets.token_bytes(32)
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=['localhost', '127.0.0.1'])
 app.mount('/assets', StaticFiles(directory=WEB), name='assets')
@@ -41,8 +45,9 @@ class Candidate(BaseModel):
     location: str = Field(default='', max_length=100)
     region: Literal['india', 'anywhere'] = 'india'
     relocation: Literal['unknown', 'india', 'anywhere', 'no'] = 'unknown'
-    experience_flexibility: Literal['strict', 'one_year'] = 'strict'
-    max_applications: int = Field(default=10, ge=1, le=10)
+    experience_flexibility: Literal['strict', 'one_year', 'flexible'] = 'strict'
+    resume_mode: Literal['original', 'tailored'] = 'original'
+    max_applications: int = Field(default=5, ge=1, le=10)
 
     @field_validator('first_name', 'last_name', 'email', 'phone', 'role', 'location', mode='before')
     @classmethod
@@ -75,6 +80,17 @@ def validate_ai_settings(provider, model, workspace_id, api_key):
     return model
 
 
+def make_connection_ticket(provider, model, workspace_id, api_key):
+    settings = json.dumps([provider, model, workspace_id, api_key.strip()], separators=(',', ':')).encode()
+    return hmac.new(CONNECTION_SECRET, settings, hashlib.sha256).hexdigest()
+
+
+def verify_connection(provider, model, workspace_id, api_key, ticket):
+    expected = make_connection_ticket(provider, model, workspace_id, api_key)
+    if not re.fullmatch(r'[0-9a-f]{64}', ticket) or not hmac.compare_digest(ticket, expected):
+        raise HTTPException(status_code=400, detail='Test your AI connection before starting.')
+
+
 def resume_text(content: bytes) -> str:
     if not content.startswith(b'%PDF-') or len(content) > 5_000_000:
         raise ValueError('Choose a PDF resume smaller than 5 MB.')
@@ -103,11 +119,11 @@ def report(kind, message, job=None):
 
 @app.middleware('http')
 async def local_headers(request: Request, call_next):
-    if request.method == 'POST' and request.url.path in ('/api/start', '/api/test-ai'):
+    if request.method == 'POST' and request.url.path in ('/api/start', '/api/test-ai', '/api/tailor-resume'):
         try:
             if 'content-length' not in request.headers:
                 return HTMLResponse('A content length is required.', status_code=411)
-            limit = 5_500_000 if request.url.path == '/api/start' else 10_000
+            limit = 10_000 if request.url.path == '/api/test-ai' else 5_500_000
             if int(request.headers['content-length']) > limit:
                 return HTMLResponse('Request is too large.', status_code=413)
         except ValueError:
@@ -160,8 +176,34 @@ async def test_ai_connection(provider: str = Form('openai'), model: str = Form('
                                             example.title, 'Remote', provider=provider, model=model,
                                             api_key=api_key.strip(), workspace_id=workspace_id), timeout=70)
     except Exception as exc:
+        raise HTTPException(status_code=400, detail='Connection failed. ' + ai_error_message(exc)) from exc
+    return {'message': 'Connected. You can start your search.',
+            'verification': make_connection_ticket(provider, model, workspace_id, api_key)}
+
+
+@app.post('/api/tailor-resume')
+async def tailor_resume(description: str = Form(...), provider: str = Form('openai'), model: str = Form(''),
+                        api_key: str = Form(...), workspace_id: str = Form(''), connection_ticket: str = Form(''),
+                        resume: UploadFile = File(...), x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    model = validate_ai_settings(provider, model, workspace_id, api_key)
+    verify_connection(provider, model, workspace_id, api_key, connection_ticket)
+    if not 20 <= len(description.strip()) <= 16000:
+        raise HTTPException(status_code=400, detail='Paste a job description between 20 and 16,000 characters.')
+    try:
+        text = resume_text(await resume.read(5_000_001))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await resume.close()
+    try:
+        client = AsyncOpenAI(api_key=api_key.strip(), timeout=60, max_retries=1) if provider == 'openai' else httpx.AsyncClient(timeout=60)
+        async with client:
+            draft = await asyncio.wait_for(resume_draft(client, text, description.strip(), provider=provider, model=model,
+                                                        api_key=api_key.strip(), workspace_id=workspace_id), timeout=120)
+    except Exception as exc:
         raise HTTPException(status_code=400, detail=ai_error_message(exc)) from exc
-    return {'message': 'AI connection works. No application was sent.'}
+    return draft.model_dump()
 
 
 @app.post('/api/start')
@@ -169,8 +211,10 @@ async def start(
     first_name: str = Form(...), last_name: str = Form(...), email: str = Form(...),
     phone: str = Form(...), role: str = Form(...), location: str = Form(''), region: str = Form('india'),
     relocation: str = Form('unknown'), experience_flexibility: str = Form('strict'),
-    max_applications: int = Form(10), api_key: str = Form(...), consent: bool = Form(False),
+    resume_mode: str = Form('original'),
+    max_applications: int = Form(5), api_key: str = Form(...), consent: bool = Form(False),
     provider: str = Form('openai'), model: str = Form(''), workspace_id: str = Form(''),
+    connection_ticket: str = Form(''),
     resume: UploadFile = File(...), x_app_token: str | None = Header(default=None),
 ):
     verify_token(x_app_token)
@@ -182,10 +226,12 @@ async def start(
         try:
             candidate = Candidate(first_name=first_name, last_name=last_name, email=email, phone=phone,
                                   role=role, location=location, region=region, relocation=relocation,
-                                  experience_flexibility=experience_flexibility, max_applications=max_applications).model_dump()
+                                  experience_flexibility=experience_flexibility, resume_mode=resume_mode,
+                                  max_applications=max_applications).model_dump()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail='Please check your contact details, job title, and application limit.') from exc
         model = validate_ai_settings(provider, model, workspace_id, api_key)
+        verify_connection(provider, model, workspace_id, api_key, connection_ticket)
         try:
             content = await resume.read(5_000_001)
             text = resume_text(content)

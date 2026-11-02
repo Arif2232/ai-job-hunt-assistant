@@ -29,7 +29,7 @@
             <label>Location <span class="optional">optional</span><input name="location" maxlength="100" placeholder="e.g. Remote or Bengaluru" autocomplete="address-level2"></label>
             <label>Search area <select name="region"><option value="india">India and worldwide remote</option><option value="anywhere">Anywhere</option></select></label>
             <label>Relocation <select name="relocation"><option value="unknown">I'll decide for each job</option><option value="india">Open to relocating within India</option><option value="anywhere">Open to relocating internationally</option><option value="no">Local and remote only</option></select></label>
-            <label>Experience requirements <select name="experience_flexibility"><option value="one_year">Include jobs asking for up to 1 extra year</option><option value="strict">Only jobs where I meet the stated years</option></select><small>Your resume is sent as-is; experience is never invented.</small></label>
+            <label>Experience requirements <select name="experience_flexibility"><option value="flexible">Be flexible about years of experience</option><option value="one_year">Include jobs asking for up to 1 extra year</option><option value="strict">Only jobs where I meet the stated years</option></select><small>Your resume is sent as-is; experience is never invented.</small></label>
           </div>
         </section>
         <section class="card">
@@ -45,6 +45,7 @@
           <div class="section-head"><span class="step">03</span><div><h2>Your resume and AI</h2><p>Help us check which jobs are a good fit.</p></div></div>
           <div class="fields">
             <label>Resume <span class="required">*</span><input name="resume" type="file" accept="application/pdf,.pdf" required><small>PDF with selectable text, up to 5 MB.</small></label>
+            <label>Resume for applications <select name="resume_mode"><option value="original">Use my original resume</option><option value="tailored">Tailor automatically for each job</option></select><small>Automatic tailoring adds a page of exact lines from your resume and keeps the original pages. It uses additional AI requests.</small></label>
             <div class="fields two">
               <label>AI provider <select name="provider" id="provider" required><option value="">Loading options…</option></select></label>
               <label>Model <select name="model" id="model" required><option value="">Choose a provider</option></select></label>
@@ -59,11 +60,26 @@
               <p id="test-ai-result" class="notice" role="status" hidden></p>
             </div>
             <p id="privacy-note" class="model-hint" hidden>Gemini's free tier may use submitted data to improve Google's products. Check your plan's privacy terms.</p>
+            <details class="draft-tool">
+              <summary>Tailor and review a resume for one job</summary>
+              <p>Paste a job description to create an editable draft. Your resume text and the description are sent to your AI provider, and API charges may apply.</p>
+              <label>Job description <textarea id="job-description" rows="6" maxlength="16000" placeholder="Paste the job description here"></textarea></label>
+              <button type="button" id="draft-button" class="secondary" disabled>Generate resume draft</button>
+              <p id="draft-message" role="status" hidden></p>
+              <div id="draft-wrap" hidden>
+                <label>Review and edit your draft <textarea id="draft-resume" rows="14"></textarea></label>
+                <p class="notice">Check every detail. Only include skills and experience you actually have.</p>
+                <p id="missing-skills" class="model-hint"></p>
+                <button type="button" id="print-draft" class="secondary">Print or save as PDF</button>
+                <small>Choose “Save as PDF”, then upload it above if you want to use it in a search.</small>
+              </div>
+            </details>
           </div>
           <label class="consent"><input type="checkbox" name="consent" required><span id="consent-text">I want to apply automatically. My resume text and job preferences are sent to my selected AI provider for matching, and my resume and details are sent to employers for supported applications.</span></label>
-          <p class="notice">Each search attempts up to 10 applications. AI checks up to 100 jobs from the past 30 days with a verified posting date, starting with the newest. More checks can increase API charges. Only simple, supported forms are submitted; other forms are skipped for your review.</p>
+          <p class="notice">Each search attempts up to 5 applications, checking recent jobs until the goal is reached or no more are available. AI charges may increase with more checks. If a submission cannot be confirmed, it counts toward the limit. Unsupported forms are left for your review.</p>
           <p id="error" class="error" role="alert" hidden></p>
-          <div class="actions"><button type="submit" id="start">Find and apply <span aria-hidden="true">↗</span></button><button type="button" id="stop" class="secondary" hidden>Stop after current job</button></div>
+          <div class="actions"><button type="submit" id="start" disabled>Find and apply <span aria-hidden="true">↗</span></button><button type="button" id="stop" class="secondary" hidden>Stop after current job</button></div>
+          <small>Test your AI connection before starting a search.</small>
         </section>
       </form>
       <aside class="sidebar">
@@ -77,5 +93,6 @@
     </div>
     <footer>Made to make the job hunt feel a little lighter. <span>✦</span></footer>
   </main>
+  <div id="print-resume" class="print-resume" aria-hidden="true"></div>
 </body>
 </html>

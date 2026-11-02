@@ -1,8 +1,10 @@
 import asyncio
+import io
 import socket
 
 import uvicorn
 from playwright.async_api import async_playwright, expect
+from pypdf import PdfReader
 
 from app.server import app
 
@@ -25,13 +27,13 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
             page = await browser.new_page()
             await page.goto(f'http://127.0.0.1:{port}/')
             await page.wait_for_selector('#provider option[value="openai"]', state='attached')
+            await expect(page.locator('#start')).to_be_disabled()
             assert await page.locator('#model').input_value() == 'gpt-6-luna'
             assert await page.locator('input[name="max_applications"]').count() == 0
-            assert await page.get_by_text('Each search attempts up to 10 applications', exact=False).is_visible()
-            assert await page.get_by_text('AI checks up to 100 jobs', exact=False).is_visible()
-            assert await page.get_by_text('More checks can increase API charges', exact=False).is_visible()
+            assert await page.get_by_text('up to 5 applications', exact=False).is_visible()
+            assert await page.get_by_text('AI charges may increase', exact=False).is_visible()
             assert await page.locator('select[name="relocation"]').input_value() == 'unknown'
-            assert await page.locator('select[name="experience_flexibility"]').input_value() == 'one_year'
+            assert await page.locator('select[name="experience_flexibility"]').input_value() == 'flexible'
             await page.locator('input[name="api_key"]').fill('dummy-key-not-real')
             await page.locator('input[name="consent"]').check()
             await page.select_option('#provider', 'gemini')
@@ -51,6 +53,7 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
                 await page.locator(f'input[name="{name}"]').fill(value)
             await page.select_option('select[name="relocation"]', 'india')
             await page.select_option('select[name="experience_flexibility"]', 'one_year')
+            await page.select_option('select[name="resume_mode"]', 'tailored')
             await page.locator('input[name="resume"]').set_input_files({
                 'name': 'resume.pdf', 'mimeType': 'application/pdf', 'buffer': b'%PDF-test',
             })
@@ -58,14 +61,47 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
             tested = []
             async def fake_test(route):
                 tested.append(route.request.post_data or '')
-                await route.fulfill(status=200, content_type='application/json', body='{"message":"AI connection works. No application was sent."}')
+                if len(tested) == 1:
+                    await route.fulfill(status=400, content_type='application/json', body='{"detail":"Connection failed. Check your API key."}')
+                else:
+                    await route.fulfill(status=200, content_type='application/json', body='{"message":"Connected. You can start your search.","verification":"example-ticket"}')
             await page.route('**/api/test-ai', fake_test)
             async with page.expect_response('**/api/test-ai'):
                 await page.locator('#test-ai').click()
-            await expect(page.locator('#test-ai-result')).to_contain_text('AI connection works')
+            await expect(page.locator('#test-ai-result')).to_contain_text('Connection failed')
+            await expect(page.locator('#start')).to_be_disabled()
+            async with page.expect_response('**/api/test-ai'):
+                await page.locator('#test-ai').click()
+            await expect(page.locator('#test-ai-result')).to_contain_text('Connected')
+            await expect(page.locator('#start')).to_be_enabled()
             assert 'dummy-test-key-only' in tested[0] and 'claude-haiku-5-5' in tested[0]
             assert all(value not in tested[0] for value in ['candidate@example.com', '1234567890', 'resume.pdf'])
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
+            await page.locator('.draft-tool summary').click()
+            await page.locator('#job-description').fill('Example job description with enough detail for a test.')
+            drafts = []
+            async def fake_draft(route):
+                drafts.append(route.request.post_data or '')
+                await route.fulfill(status=200, content_type='application/json', body='{"resume":"Example draft","missing_skills":["Example skill"]}')
+            await page.route('**/api/tailor-resume', fake_draft)
+            async with page.expect_response('**/api/tailor-resume'):
+                await page.locator('#draft-button').click()
+            await expect(page.locator('#draft-resume')).to_have_value('Example draft')
+            await expect(page.locator('#missing-skills')).to_contain_text('Example skill')
+            await page.locator('#draft-resume').fill('Reviewed draft')
+            assert await page.locator('#print-draft').is_visible()
+            await page.evaluate('window.print = () => {}')
+            await page.locator('#print-draft').click()
+            pdf = await page.pdf(format='A4')
+            printed = '\n'.join(item.extract_text() for item in PdfReader(io.BytesIO(pdf)).pages)
+            assert 'Reviewed draft' in printed and 'API key' not in printed
+            assert 'resume.pdf' in drafts[0] and 'candidate@example.com' not in drafts[0]
+            await page.locator('input[name="api_key"]').fill('different-dummy-key')
+            await expect(page.locator('#start')).to_be_disabled()
+            await page.locator('input[name="api_key"]').fill('dummy-test-key-only')
+            async with page.expect_response('**/api/test-ai'):
+                await page.locator('#test-ai').click()
+            await expect(page.locator('#start')).to_be_enabled()
             sent = []
             async def fake_start(route):
                 sent.append(route.request.post_data or '')
@@ -75,7 +111,9 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
                 await page.locator('#start').click()
             await expect(page.locator('#start')).to_be_enabled()
             assert len(sent) == 1 and 'dummy-test-key-only' in sent[0]
+            assert 'connection_ticket' in sent[0] and 'example-ticket' in sent[0]
             assert 'relocation' in sent[0] and 'india' in sent[0] and 'one_year' in sent[0]
+            assert 'resume_mode' in sent[0] and 'tailored' in sent[0]
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
             await page.route('**/api/status', lambda route: route.fulfill(
                 status=200, content_type='application/json', body='{"running":false,"events":[{"kind":"skipped","message":"Not a close match","url":"https://job-boards.greenhouse.io/example/jobs/123"},{"kind":"error","message":"AI failed"}]}'))
@@ -89,6 +127,7 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
             await page.select_option('#provider', 'openai')
             assert await page.locator('input[name="api_key"]').input_value() == ''
             assert await page.locator('#test-ai-result').is_hidden()
+            await expect(page.locator('#start')).to_be_disabled()
             await browser.close()
     finally:
         server.should_exit = True

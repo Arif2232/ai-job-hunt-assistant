@@ -1,5 +1,6 @@
 import asyncio
 import re
+import tempfile
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
@@ -11,6 +12,7 @@ from pydantic import ValidationError
 
 from app.apply import apply_to_job, matches_job
 from app.matching import ai_match, selected_model
+from app.tailoring import make_tailored_pdf, resume_highlights
 from src.config import Board
 from src.discovery import ashby, greenhouse, lever
 from src.discovery.common import HTTP
@@ -39,7 +41,6 @@ SOURCES = {
         Board(name='ElevenLabs', board='elevenlabs'), Board(name='Linear', board='linear'),
     ],
 }
-MAX_JOBS_TO_REVIEW = 100
 
 
 def title_matches(title: str, requested: str) -> bool:
@@ -133,7 +134,7 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
     if not jobs:
         report('done', 'No recent jobs with verified dates matched your search. Try a broader title or location.')
         return
-    report('searching', f'Found {len(jobs)} recent jobs. AI will check up to the newest {min(len(jobs), MAX_JOBS_TO_REVIEW)} against your resume.')
+    report('searching', f'Found {len(jobs)} recent jobs. AI will check the newest first until your application goal is reached.')
     attempts = 0
     confirmed = 0
     needs_review = 0
@@ -144,7 +145,7 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
             browser = None
             try:
                 invalid_responses = 0
-                for job in jobs[:MAX_JOBS_TO_REVIEW]:
+                for job in jobs:
                     if stop.is_set() or attempts >= candidate['max_applications']:
                         break
                     report('reviewing', f'Checking {job.title} at {job.company}.', job)
@@ -177,11 +178,40 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                         except Exception:
                             report('error', 'The application browser is not installed. Restart the app using the startup file for your computer.')
                             return
-                    page = await browser.new_page()
+                    temporary = None
                     try:
-                        status, message = await apply_to_job(page, job, candidate, resume, ledger)
+                        application_resume = resume
+                        if candidate.get('resume_mode') == 'tailored':
+                            report('reviewing', 'Preparing a tailored resume from your existing resume.', job)
+                            try:
+                                lines = await resume_highlights(client, resume_text, job.title, job.description,
+                                                                provider=provider, model=model, api_key=api_key,
+                                                                workspace_id=workspace_id)
+                            except ValueError:
+                                report('error', 'Could not safely tailor the resume. Try the original resume or review a draft.')
+                                return
+                            except Exception as exc:
+                                report('error', ai_error_message(exc))
+                                return
+                            if stop.is_set():
+                                break
+                            try:
+                                temporary = tempfile.TemporaryDirectory(dir=resume.parent)
+                                application_resume = Path(temporary.name) / 'resume.pdf'
+                                make_tailored_pdf(resume, lines, application_resume,
+                                                  name=f"{candidate['first_name']} {candidate['last_name']}",
+                                                  email=candidate['email'], phone=candidate['phone'], job_title=job.title)
+                            except Exception:
+                                report('error', 'Could not prepare the tailored PDF. Try the original resume or review a draft.')
+                                return
+                        page = await browser.new_page()
+                        try:
+                            status, message = await apply_to_job(page, job, candidate, application_resume, ledger)
+                        finally:
+                            await page.close()
                     finally:
-                        await page.close()
+                        if temporary:
+                            temporary.cleanup()
                     report(status, message, job)
                     if status in ('submitted', 'uncertain'):
                         attempts += 1
@@ -194,5 +224,7 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                     await browser.close()
     if stop.is_set():
         report('stopped', 'Stopped after the current job.')
+    elif not attempts:
+        report('done', f'No applications were sent. {needs_review} job(s) need review. Check the results below.')
     else:
         report('done', f'Finished. {confirmed} application(s) confirmed; {needs_review} need review.')

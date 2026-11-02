@@ -55,3 +55,38 @@ def test_connection_errors_are_actionable_and_do_not_expose_the_key(monkeypatch,
     assert response.status_code == 400
     assert keyword in response.json()['detail'].lower()
     assert 'dummy-secret-key' not in response.text
+
+
+def test_search_requires_a_successful_test_for_the_same_ai_settings(monkeypatch, tmp_path):
+    class FakeClient:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+    async def match(*args, **kwargs): return Decision(suitable=True, reason='Example')
+    calls = []
+    async def hunt(*args, **kwargs): calls.append('started')
+    monkeypatch.setattr(server, 'AsyncOpenAI', FakeClient)
+    monkeypatch.setattr(server, 'ai_match', match)
+    monkeypatch.setattr(server, 'run_hunt', hunt)
+    monkeypatch.setattr(server, 'resume_text', lambda content: 'Example resume')
+    monkeypatch.setattr(server, 'DATA', tmp_path)
+    server.state.update({'task': None, 'events': []})
+    settings = {'provider': 'openai', 'model': 'gpt-6-luna', 'api_key': 'dummy-test-key-only'}
+    form = settings | {'first_name': 'Avery', 'last_name': 'Example', 'email': 'candidate@example.com',
+                       'phone': '1234567890', 'role': 'Manager', 'consent': 'true'}
+    files = {'resume': ('resume.pdf', b'%PDF-test', 'application/pdf')}
+    headers = {'X-App-Token': server.TOKEN}
+    with TestClient(server.app, base_url='http://127.0.0.1') as client:
+        assert client.post('/api/start', headers=headers, data=form, files=files).status_code == 400
+        tested = client.post('/api/test-ai', headers=headers, data=settings)
+        assert tested.status_code == 200
+        ticket = tested.json()['verification']
+        assert 'dummy-test-key-only' not in ticket
+        for changed in ({'api_key': 'other-dummy-key-only'}, {'model': 'gpt-6.1-terra'}, {'workspace_id': 'different'}, {'connection_ticket': 'invalid'}, {'connection_ticket': '☃'}):
+            attempt = form | {'connection_ticket': ticket} | changed
+            assert client.post('/api/start', headers=headers, data=attempt, files=files).status_code == 400
+        assert not calls
+        response = client.post('/api/start', headers=headers, data=form | {'connection_ticket': ticket}, files=files)
+        assert response.status_code == 200
+        client.get('/api/status', headers=headers)
+    assert calls == ['started']

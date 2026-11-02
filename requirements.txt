@@ -8,3 +8,4 @@ python-multipart>=0.0.9,<1
 openai>=2,<3
 playwright>=1.51,<2
 pypdf>=5,<7
+reportlab>=4.2,<5

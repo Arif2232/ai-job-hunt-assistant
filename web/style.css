@@ -24,10 +24,10 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.035em; }
 label { display: block; font-size: 12px; font-weight: 700; color: #52645b; }
 .required { color: #b27c71; }
 .optional { color: #9ca9a2; font-weight: 400; }
-input:not([type=checkbox]), select { display: block; width: 100%; min-height: 44px; margin-top: 7px; padding: 11px 13px; border: 1px solid #dfe7df; border-radius: 10px; font: inherit; font-size: 14px; font-weight: 400; color: #26342d; background: #fcfdfb; }
+input:not([type=checkbox]), select, textarea { display: block; width: 100%; min-height: 44px; margin-top: 7px; padding: 11px 13px; border: 1px solid #dfe7df; border-radius: 10px; font: inherit; font-size: 14px; font-weight: 400; color: #26342d; background: #fcfdfb; }
 input[type=file] { padding: 9px; }
 input::placeholder { color: #a6b1aa; }
-input:focus, select:focus, button:focus-visible, a:focus-visible { outline: 3px solid #a8cfb5; outline-offset: 2px; }
+input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3px solid #a8cfb5; outline-offset: 2px; }
 small { display: block; color: #84948a; font-weight: 400; line-height: 1.55; margin-top: 7px; }
 a { color: #3d7b5e; }
 .consent { display: flex; align-items: flex-start; gap: 10px; margin-top: 22px; font-weight: 500; line-height: 1.55; color: #53645a; }
@@ -67,3 +67,11 @@ footer span { color: #85a992; }
 @media (max-width: 760px) { .topbar, .page { padding-left: 20px; padding-right: 20px; } .local-badge { display: none; } .intro { padding-top: 44px; } .layout { grid-template-columns: 1fr; } .sidebar { grid-row: 1; position: static; } .progress-card { min-height: 0; } .empty { padding: 20px 0 0; } .empty > span { display: none; } .card, .progress-card { padding: 22px; } }
 @media (max-width: 440px) { .fields.two { grid-template-columns: 1fr; } }
 .model-hint { margin: -7px 0 0; color: #819187; font-size: 12px; line-height: 1.5; }
+.draft-tool { padding: 14px; border: 1px solid #e4e9e1; border-radius: 10px; }
+.draft-tool summary { cursor: pointer; color: #456452; font-size: 13px; font-weight: 700; }
+.draft-tool p { font-size: 12px; line-height: 1.5; color: #63796a; }
+.draft-tool button { margin-top: 12px; }
+.draft-tool .error { color: #a53f3a; }
+.draft-tool .model-hint { margin: 14px 0 0; }
+.print-resume { display: none; }
+@media print { body > :not(.print-resume) { display: none !important; } .print-resume { display: block; white-space: pre-wrap; color: #000; font-size: 11pt; line-height: 1.4; } }

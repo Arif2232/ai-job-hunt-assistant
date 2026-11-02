@@ -59,7 +59,8 @@ def isolated_hunt(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, 'AsyncOpenAI', FakeClient)
     monkeypatch.setattr(runner, 'async_playwright', FakePlaywright)
     monkeypatch.setattr(runner.greenhouse, 'discover', discover)
-    return {'candidate': {'email': 'candidate@example.com', 'role': 'Operations Manager', 'location': '',
+    return {'candidate': {'first_name': 'Avery', 'last_name': 'Example', 'phone': '1234567890',
+                          'email': 'candidate@example.com', 'role': 'Operations Manager', 'location': '',
                           'region': 'india', 'max_applications': 10},
             'resume': tmp_path / 'resume.pdf', 'ledger': ApplicationLog(tmp_path / 'state')}
 
@@ -151,7 +152,7 @@ async def test_search_keeps_checking_after_twenty_jobs_until_it_finds_a_match(is
     assert any(event[0] == 'skipped' and 'Example reason' in event[1] for event in events)
 
 
-async def test_search_caps_ai_checks(isolated_hunt, monkeypatch):
+async def test_search_checks_all_jobs_if_the_goal_has_not_been_reached(isolated_hunt, monkeypatch):
     checked = []
     async def discover(*args, **kwargs): return [job(str(i)) for i in range(1, 102)]
     async def match(client, item, *args, **kwargs):
@@ -162,8 +163,35 @@ async def test_search_caps_ai_checks(isolated_hunt, monkeypatch):
     events = []
     await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
                           isolated_hunt['ledger'], lambda *args: events.append(args), asyncio.Event())
-    assert len(checked) == 100
-    assert any(event[0] == 'searching' and 'newest 100' in event[1] for event in events)
+    assert len(checked) == 101
+    assert any(event[0] == 'searching' and '101' in event[1] for event in events)
+
+
+async def test_five_possible_submissions_stop_the_search_even_if_one_is_uncertain(isolated_hunt, monkeypatch):
+    applied = []
+    async def discover(*args, **kwargs): return [job(str(i)) for i in range(1, 8)]
+    async def match(*args, **kwargs): return Decision(suitable=True, reason='Example')
+    async def apply(page, item, *args):
+        applied.append(item.source_id)
+        return ('uncertain', 'Check submission') if item.source_id == '3' else ('submitted', 'Confirmed')
+    isolated_hunt['candidate']['max_applications'] = 5
+    monkeypatch.setattr(runner.greenhouse, 'discover', discover)
+    monkeypatch.setattr(runner, 'ai_match', match)
+    monkeypatch.setattr(runner, 'apply_to_job', apply)
+    events = []
+    await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
+                          isolated_hunt['ledger'], lambda *args: events.append(args), asyncio.Event())
+    assert applied == ['1', '2', '3', '4', '5']
+    assert '4 application(s) confirmed; 1 need review' in events[-1][1]
+
+
+async def test_no_applications_is_reported_clearly(isolated_hunt, monkeypatch):
+    async def match(*args, **kwargs): return Decision(suitable=False, reason='Example')
+    monkeypatch.setattr(runner, 'ai_match', match)
+    events = []
+    await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
+                          isolated_hunt['ledger'], lambda *args: events.append(args), asyncio.Event())
+    assert events[-1][0] == 'done' and 'No applications were sent' in events[-1][1]
 
 
 @pytest.mark.parametrize('region,location', [('india', 'India and worldwide remote'), ('anywhere', 'Anywhere')])
@@ -189,3 +217,46 @@ async def test_ai_receives_the_users_application_preferences(isolated_hunt, monk
     await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
                           isolated_hunt['ledger'], lambda *args: None, asyncio.Event())
     assert seen and all(item['relocation'] == 'india' and item['experience_flexibility'] == 'one_year' for item in seen)
+
+
+async def test_automatic_tailoring_attaches_a_temporary_pdf_and_cleans_it_up(isolated_hunt, monkeypatch):
+    from pypdf import PdfReader, PdfWriter
+
+    applied = []
+    async def match(*args, **kwargs): return Decision(suitable=True, reason='Example')
+    async def highlights(*args, **kwargs): return ['Example resume']
+    async def apply(page, item, candidate, resume, ledger):
+        pages = PdfReader(resume).pages
+        text = pages[0].extract_text()
+        assert len(pages) == 2 and 'Example resume' in text and 'Avery Example' in text
+        applied.append(resume)
+        return 'submitted', 'Confirmed'
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    with isolated_hunt['resume'].open('wb') as handle: writer.write(handle)
+    original = isolated_hunt['resume'].read_bytes()
+    isolated_hunt['candidate'].update(resume_mode='tailored', max_applications=1)
+    monkeypatch.setattr(runner, 'ai_match', match)
+    monkeypatch.setattr(runner, 'resume_highlights', highlights, raising=False)
+    monkeypatch.setattr(runner, 'apply_to_job', apply)
+    events = []
+    await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
+                          isolated_hunt['ledger'], lambda *args: events.append(args), asyncio.Event())
+    assert len(applied) == 1 and not applied[0].exists()
+    assert isolated_hunt['resume'].read_bytes() == original
+    assert events[-1][0] == 'done'
+
+
+async def test_automatic_tailoring_failure_never_submits_an_unverified_resume(isolated_hunt, monkeypatch):
+    calls = []
+    async def match(*args, **kwargs): return Decision(suitable=True, reason='Example')
+    async def bad_highlights(*args, **kwargs): raise ValueError('Invented line')
+    async def apply(*args, **kwargs): calls.append('applied')
+    isolated_hunt['candidate']['resume_mode'] = 'tailored'
+    monkeypatch.setattr(runner, 'ai_match', match)
+    monkeypatch.setattr(runner, 'resume_highlights', bad_highlights, raising=False)
+    monkeypatch.setattr(runner, 'apply_to_job', apply)
+    events = []
+    await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
+                          isolated_hunt['ledger'], lambda *args: events.append(args), asyncio.Event())
+    assert not calls and events[-1][0] == 'error'
