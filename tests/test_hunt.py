@@ -140,6 +140,14 @@ def test_short_job_titles_can_be_searched():
     assert not runner.title_matches('Account Manager', 'HR')
 
 
+def test_seniority_alone_does_not_match_unrelated_roles():
+    assert runner.title_matches('Senior Software Engineer', 'Senior Software Engineer')
+    assert runner.title_matches('Staff Software Engineer', 'Senior Software Engineer')
+    assert not runner.title_matches('Senior Internal Auditor', 'Senior Software Engineer')
+    assert not runner.title_matches('Senior Program Manager', 'Senior Software Engineer')
+    assert runner.title_matches('Senior Manager', 'Senior')
+
+
 @pytest.mark.parametrize('status,fragment', [(401, 'rejected'), (403, 'permission'), (404, 'unavailable'), (429, 'usage limit'), (500, 'matching failed')])
 def test_ai_errors_explain_the_problem_without_exposing_the_key(status, fragment):
     import httpx

@@ -42,9 +42,11 @@ SOURCES = {
 
 
 def title_matches(title: str, requested: str) -> bool:
+    # shortcut: exact words miss synonyms; broaden when related titles need discovery.
     words = [word for word in re.findall(r'[a-z0-9]+', requested.lower()) if len(word) >= 2]
+    role_words = [word for word in words if word not in {'senior', 'sr', 'junior', 'jr', 'staff', 'principal', 'lead', 'associate', 'intern', 'ii', 'iii', 'iv'}]
     title_words = set(re.findall(r'[a-z0-9]+', title.lower()))
-    return bool(words) and any(word in title_words for word in words)
+    return any(word in title_words for word in (role_words or words))
 
 
 def location_matches(job, requested: str, region: str) -> bool:
