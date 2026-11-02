@@ -9,6 +9,7 @@ from pypdf import PdfWriter
 from app import server
 from app.apply import matches_job, preflight
 from app.matching import Decision, ai_match, selected_model
+from app.memory import AnswerMemory
 from app.storage import ApplicationLog
 from src.models import Job
 
@@ -111,6 +112,7 @@ def test_local_interface_checks_token_and_consent_without_sending_anything(tmp_p
         status = client.get('/api/status', headers={'X-App-Token': server.TOKEN}).json()
         assert any(event['kind'] == 'done' for event in status['events'])
     assert len(calls) == 1 and calls[0][1]
+    assert AnswerMemory(tmp_path).profile(form['email'])['phone'] == '1234567890'
     assert not list(Path(tmp_path).glob('*.pdf'))
     assert all(b'test-api-key-not-real' not in path.read_bytes() for path in Path(tmp_path).rglob('*') if path.is_file())
 
@@ -127,7 +129,7 @@ def test_search_preferences_are_validated_and_reach_the_runner(tmp_path, monkeyp
     server.state.update({'task': None, 'events': []})
     form = {'first_name': 'Avery', 'last_name': 'Example', 'email': 'candidate@example.com',
             'phone': '1234567890', 'role': 'Engineer', 'api_key': 'test-api-key-not-real', 'consent': 'true',
-            'relocation': 'india', 'experience_flexibility': 'one_year', 'resume_mode': mode}
+            'relocation': 'india', 'experience_flexibility': 'one_year', 'resume_mode': mode, 'remember_questions': 'false'}
     verify_settings(form)
     files = {'resume': ('resume.pdf', b'%PDF-test', 'application/pdf')}
     with TestClient(server.app, base_url='http://127.0.0.1') as client:
@@ -145,6 +147,8 @@ def test_search_preferences_are_validated_and_reach_the_runner(tmp_path, monkeyp
         client.get('/api/status', headers={'X-App-Token': server.TOKEN})
     assert calls[0]['relocation'] == 'india' and calls[0]['experience_flexibility'] == 'one_year'
     assert calls[0]['resume_mode'] == mode
+    assert calls[0]['remember_questions'] is False
+    assert AnswerMemory(tmp_path).profile(form['email']) == {}
 
 
 @pytest.mark.parametrize('provider,model', [

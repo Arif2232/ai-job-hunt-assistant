@@ -187,7 +187,7 @@ async def test_real_runner_and_api_wait_for_approval_before_opening_a_form(pendi
     async def discover(*args, **kwargs): return [item]
     async def match(*args, **kwargs): return Decision(suitable=True, reason='Example')
     async def highlights(*args, **kwargs): return ['Example experience']
-    async def apply(page, job, candidate, resume, ledger):
+    async def apply(page, job, candidate, resume, ledger, **kwargs):
         assert 'Example experience' in PdfReader(resume).pages[0].extract_text()
         calls.append('submitted')
         return 'submitted', 'Confirmed'

@@ -5,6 +5,7 @@ import io
 import json
 import re
 import secrets
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -19,6 +20,7 @@ from pypdf import PdfReader
 from openai import AsyncOpenAI
 
 from app.matching import PROVIDERS, ai_match, selected_model
+from app.memory import AnswerMemory
 from app.runner import ai_error_message, run_hunt
 from app.storage import ApplicationLog
 from app.tailoring import make_tailored_pdf, resume_draft
@@ -41,6 +43,11 @@ class Candidate(BaseModel):
     last_name: str = Field(min_length=1, max_length=100)
     email: str = Field(min_length=3, max_length=254)
     phone: str = Field(min_length=5, max_length=40)
+    current_city: str = Field(default='', max_length=100)
+    current_country: str = Field(default='', max_length=100)
+    preferred_first_name: str = Field(default='', max_length=100)
+    phone_country: str = Field(default='', max_length=200)
+    remember_questions: bool = True
     role: str = Field(min_length=2, max_length=100)
     location: str = Field(default='', max_length=100)
     region: Literal['india', 'anywhere'] = 'india'
@@ -49,7 +56,8 @@ class Candidate(BaseModel):
     resume_mode: Literal['original', 'tailored', 'review'] = 'original'
     max_applications: int = Field(default=5, ge=1, le=10)
 
-    @field_validator('first_name', 'last_name', 'email', 'phone', 'role', 'location', mode='before')
+    @field_validator('first_name', 'last_name', 'email', 'phone', 'role', 'location', 'current_city',
+                     'current_country', 'preferred_first_name', 'phone_country', mode='before')
     @classmethod
     def strip_text(cls, value):
         return value.strip() if isinstance(value, str) else value
@@ -89,6 +97,15 @@ def verify_connection(provider, model, workspace_id, api_key, ticket):
     expected = make_connection_ticket(provider, model, workspace_id, api_key)
     if not re.fullmatch(r'[0-9a-f]{64}', ticket) or not hmac.compare_digest(ticket, expected):
         raise HTTPException(status_code=400, detail='Test your AI connection before starting.')
+
+
+def memory_call(method, *args):
+    try:
+        return getattr(AnswerMemory(DATA), method)(*args)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=500, detail='Could not access saved answers on this computer.') from exc
 
 
 def resume_text(content: bytes) -> str:
@@ -177,11 +194,11 @@ def update_review_pdf(pending, text):
 
 @app.middleware('http')
 async def local_headers(request: Request, call_next):
-    if request.method == 'POST' and request.url.path in ('/api/start', '/api/test-ai', '/api/tailor-resume', '/api/review', '/api/review-preview'):
+    if request.method == 'POST' and (request.url.path.startswith('/api/memory/') or request.url.path in ('/api/start', '/api/test-ai', '/api/tailor-resume', '/api/review', '/api/review-preview')):
         try:
             if 'content-length' not in request.headers:
                 return HTMLResponse('A content length is required.', status_code=411)
-            limit = 10_000 if request.url.path in ('/api/test-ai', '/api/review', '/api/review-preview') else 5_500_000
+            limit = 20_000 if request.url.path.startswith('/api/memory/') else 10_000 if request.url.path in ('/api/test-ai', '/api/review', '/api/review-preview') else 5_500_000
             if int(request.headers['content-length']) > limit:
                 return HTMLResponse('Request is too large.', status_code=413)
         except ValueError:
@@ -202,6 +219,63 @@ async def index():
 async def options(x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
     return PROVIDERS
+
+
+@app.post('/api/memory/list')
+async def list_memory(email: str = Form(...), x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    return {'profile': memory_call('profile', email), 'questions': memory_call('questions', email)}
+
+
+@app.post('/api/memory/profile')
+async def save_memory_profile(email: str = Form(...), first_name: str = Form(''), last_name: str = Form(''),
+                              phone: str = Form(''), current_city: str = Form(''), current_country: str = Form(''),
+                              preferred_first_name: str = Form(''), phone_country: str = Form(''),
+                              x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    profile = {'first_name': first_name, 'last_name': last_name, 'phone': phone, 'current_city': current_city,
+               'current_country': current_country, 'preferred_first_name': preferred_first_name, 'phone_country': phone_country}
+    memory_call('save_profile', email, profile)
+    return {'message': 'Your details are saved on this computer.'}
+
+
+@app.post('/api/memory/answer')
+async def save_memory_answer(email: str = Form(...), question_id: int = Form(...), answer: str = Form(...),
+                             reuse_globally: bool = Form(False), x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    memory_call('save_answer', email, question_id, answer, reuse_globally)
+    return {'message': 'Answer saved.'}
+
+
+@app.post('/api/memory/add')
+async def add_memory_answer(email: str = Form(...), label: str = Form(...), kind: str = Form(...),
+                            answer: str = Form(...), x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    memory_call('add_answer', email, label, kind, answer)
+    return {'message': 'Answer saved.'}
+
+
+@app.post('/api/memory/forget')
+async def forget_memory_answer(email: str = Form(...), question_id: int = Form(...),
+                               x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    if not memory_call('delete_question', email, question_id):
+        raise HTTPException(status_code=404, detail='That question is no longer saved.')
+    return {'message': 'Answer removed.'}
+
+
+@app.post('/api/memory/clear-profile')
+async def clear_memory_profile(email: str = Form(...), x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    memory_call('delete_profile', email)
+    return {'message': 'Saved details removed.'}
+
+
+@app.post('/api/memory/clear')
+async def clear_memory(email: str = Form(...), x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    memory_call('clear', email)
+    return {'message': 'Saved details and answers removed.'}
 
 
 @app.get('/api/status')
@@ -315,6 +389,8 @@ async def tailor_resume(description: str = Form(...), provider: str = Form('open
 async def start(
     first_name: str = Form(...), last_name: str = Form(...), email: str = Form(...),
     phone: str = Form(...), role: str = Form(...), location: str = Form(''), region: str = Form('india'),
+    current_city: str = Form(''), current_country: str = Form(''), preferred_first_name: str = Form(''),
+    phone_country: str = Form(''), remember_questions: bool = Form(True),
     relocation: str = Form('unknown'), experience_flexibility: str = Form('strict'),
     resume_mode: str = Form('original'),
     max_applications: int = Form(5), api_key: str = Form(...), consent: bool = Form(False),
@@ -330,6 +406,9 @@ async def start(
             raise HTTPException(status_code=400, detail='Please confirm before starting automatic applications.')
         try:
             candidate = Candidate(first_name=first_name, last_name=last_name, email=email, phone=phone,
+                                  current_city=current_city, current_country=current_country,
+                                  preferred_first_name=preferred_first_name, phone_country=phone_country,
+                                  remember_questions=remember_questions,
                                   role=role, location=location, region=region, relocation=relocation,
                                   experience_flexibility=experience_flexibility, resume_mode=resume_mode,
                                   max_applications=max_applications).model_dump()
@@ -346,6 +425,13 @@ async def start(
             await resume.close()
         DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
         DATA.chmod(0o700)
+        try:
+            memory = AnswerMemory(DATA)
+            if candidate['remember_questions']:
+                memory.remember_profile(candidate['email'], {name: candidate[name] for name in (
+                    'first_name', 'last_name', 'phone', 'current_city', 'current_country', 'preferred_first_name', 'phone_country')})
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            raise HTTPException(status_code=500, detail='Could not access saved answers on this computer.') from exc
         path = None
         try:
             with tempfile.NamedTemporaryFile(dir=DATA, suffix='.pdf', delete=False) as handle:
@@ -367,7 +453,8 @@ async def start(
         async def worker():
             try:
                 await run_hunt(candidate, path, text, api_key.strip(), ApplicationLog(DATA), report, state['stop'],
-                               provider=provider, model=model, workspace_id=workspace_id, request_review=wait_for_review)
+                               provider=provider, model=model, workspace_id=workspace_id, request_review=wait_for_review,
+                               memory=memory)
             except Exception:
                 report('error', 'The search could not finish. Check your connection and try again.')
             finally:

@@ -9,7 +9,10 @@ from pypdf import PdfReader
 from app.server import app
 
 
-async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
+async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch(tmp_path, monkeypatch):
+    from app import server as app_server
+
+    monkeypatch.setattr(app_server, 'DATA', tmp_path)
     listener = socket.socket()
     listener.bind(('127.0.0.1', 0))
     listener.listen(32)
@@ -59,6 +62,7 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
             await page.locator('input[name="consent"]').check()
             await page.locator('input[name="resume_mode"][value="tailored"]').check()
             assert not await page.locator('input[name="consent"]').is_checked()
+            await page.locator('input[name="remember_questions"]').uncheck()
             await page.locator('input[name="resume"]').set_input_files({
                 'name': 'resume.pdf', 'mimeType': 'application/pdf', 'buffer': b'%PDF-test',
             })
@@ -119,6 +123,7 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
             assert 'connection_ticket' in sent[0] and 'example-ticket' in sent[0]
             assert 'relocation' in sent[0] and 'india' in sent[0] and 'one_year' in sent[0]
             assert 'resume_mode' in sent[0] and 'tailored' in sent[0]
+            assert 'remember_questions' in sent[0] and 'false' in sent[0]
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
             await page.route('**/api/status', lambda route: route.fulfill(
                 status=200, content_type='application/json', body='{"running":false,"events":[{"kind":"skipped","message":"Not a close match","url":"https://job-boards.greenhouse.io/example/jobs/123"},{"kind":"error","message":"AI failed"}]}'))

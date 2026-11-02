@@ -51,7 +51,7 @@ async def test_run_skips_unsuitable_jobs_and_stops_after_application_limit(tmp_p
 
     async def discover(*args, **kwargs): return [item(str(i)) for i in range(1, 13)]
     async def match(client, job, *args, **kwargs): return Decision(suitable=job.source_id != '1', reason='Test')
-    async def apply(page, job, *args):
+    async def apply(page, job, *args, **kwargs):
         calls.append(job.source_id)
         return apply_status, 'Test result'
 

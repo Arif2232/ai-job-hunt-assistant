@@ -92,7 +92,7 @@ async def test_one_unusable_ai_response_does_not_stop_other_jobs(isolated_hunt, 
         if item.source_id == '1':
             raise ValueError('AI response was incomplete')
         return Decision(suitable=True, reason='Relevant experience')
-    async def apply(page, item, *args):
+    async def apply(page, item, *args, **kwargs):
         applied.append(item.source_id)
         return 'submitted', 'Confirmed'
     monkeypatch.setattr(runner, 'ai_match', match)
@@ -108,7 +108,7 @@ async def test_one_unusable_ai_response_does_not_stop_other_jobs(isolated_hunt, 
 @pytest.mark.parametrize('first_status', ['needs_attention', 'uncertain'])
 async def test_summary_counts_every_job_needing_review(isolated_hunt, monkeypatch, first_status):
     async def match(*args, **kwargs): return Decision(suitable=True, reason='Relevant experience')
-    async def apply(page, item, *args):
+    async def apply(page, item, *args, **kwargs):
         return (first_status, 'Check this job') if item.source_id == '1' else ('submitted', 'Confirmed')
     monkeypatch.setattr(runner, 'ai_match', match)
     monkeypatch.setattr(runner, 'apply_to_job', apply)
@@ -138,7 +138,7 @@ async def test_search_keeps_checking_after_twenty_jobs_until_it_finds_a_match(is
     async def discover(*args, **kwargs): return [job(str(i)) for i in range(1, 23)]
     async def match(client, item, *args, **kwargs):
         return Decision(suitable=item.source_id == '21', reason='Example reason')
-    async def apply(page, item, *args):
+    async def apply(page, item, *args, **kwargs):
         applied.append(item.source_id)
         return 'submitted', 'Confirmed'
     isolated_hunt['candidate']['max_applications'] = 1
@@ -171,7 +171,7 @@ async def test_five_possible_submissions_stop_the_search_even_if_one_is_uncertai
     applied = []
     async def discover(*args, **kwargs): return [job(str(i)) for i in range(1, 8)]
     async def match(*args, **kwargs): return Decision(suitable=True, reason='Example')
-    async def apply(page, item, *args):
+    async def apply(page, item, *args, **kwargs):
         applied.append(item.source_id)
         return ('uncertain', 'Check submission') if item.source_id == '3' else ('submitted', 'Confirmed')
     isolated_hunt['candidate']['max_applications'] = 5
@@ -225,7 +225,7 @@ async def test_automatic_tailoring_attaches_a_temporary_pdf_and_cleans_it_up(iso
     applied = []
     async def match(*args, **kwargs): return Decision(suitable=True, reason='Example')
     async def highlights(*args, **kwargs): return ['Example resume']
-    async def apply(page, item, candidate, resume, ledger):
+    async def apply(page, item, candidate, resume, ledger, **kwargs):
         pages = PdfReader(resume).pages
         text = pages[0].extract_text()
         assert len(pages) == 2 and 'Example resume' in text and 'Avery Example' in text
@@ -251,7 +251,7 @@ async def test_original_mode_applies_with_the_uploaded_pdf_without_tailoring_or_
     applied = []
     async def match(*args, **kwargs): return Decision(suitable=True, reason='Example')
     async def forbidden(*args, **kwargs): raise AssertionError('Original mode must not tailor or request review')
-    async def apply(page, item, candidate, resume, ledger):
+    async def apply(page, item, candidate, resume, ledger, **kwargs):
         applied.append(resume)
         return 'submitted', 'Confirmed'
     isolated_hunt['candidate'].update(resume_mode='original', max_applications=1)
@@ -291,7 +291,7 @@ async def test_one_tailoring_failure_does_not_stop_other_jobs(isolated_hunt, mon
         if len(attempts) == 1:
             raise ValueError('Unusable result')
         return ['Example resume']
-    async def apply(page, item, candidate, resume, ledger):
+    async def apply(page, item, candidate, resume, ledger, **kwargs):
         applied.append(item.source_id)
         return 'submitted', 'Confirmed'
     writer = PdfWriter()
@@ -320,7 +320,7 @@ async def test_review_mode_waits_for_each_job_and_only_applies_after_approval(is
         assert len(PdfReader(pdf).pages) == 2
         await pending.put((item.source_id, pdf, lines))
         return await answers.get()
-    async def apply(page, item, candidate, resume, ledger):
+    async def apply(page, item, candidate, resume, ledger, **kwargs):
         applied.append(item.source_id)
         assert 'Example resume' in PdfReader(resume).pages[0].extract_text()
         return 'submitted', 'Confirmed'
@@ -370,7 +370,7 @@ async def test_approval_for_one_job_is_not_reused_for_the_next(isolated_hunt, mo
     async def review(item, pdf, lines, resume, stop, **kwargs):
         await pending.put(item.source_id)
         return await answers.get()
-    async def apply(page, item, candidate, resume, ledger):
+    async def apply(page, item, candidate, resume, ledger, **kwargs):
         applied.append(item.source_id)
         return 'submitted', 'Confirmed'
     writer = PdfWriter()
@@ -406,7 +406,7 @@ async def test_review_mode_from_ui_to_mock_submission(isolated_hunt, monkeypatch
     applied = []
     async def match(*args, **kwargs): return Decision(suitable=True, reason='Example')
     async def highlights(*args, **kwargs): return ['Example resume']
-    async def apply(page, item, candidate, resume, ledger):
+    async def apply(page, item, candidate, resume, ledger, **kwargs):
         applied.append((item.source_id, PdfReader(resume).pages[0].extract_text()))
         return 'submitted', 'Confirmed'
     monkeypatch.setattr(runner, 'ai_match', match)

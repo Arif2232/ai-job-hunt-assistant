@@ -8,6 +8,7 @@
   <title>Job Hunt Assistant</title>
   <link rel="stylesheet" href="/assets/style.css">
   <script src="/assets/app.js" defer></script>
+  <script src="/assets/memory.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -26,7 +27,7 @@
           <div class="section-head"><span class="step">01</span><div><h2>What are you looking for?</h2><p>Start with the kind of work you want.</p></div></div>
           <div class="fields two">
             <label>Job title <span class="required">*</span><input name="role" required maxlength="100" placeholder="e.g. Marketing Manager" autocomplete="off"></label>
-            <label>Location <span class="optional">optional</span><input name="location" maxlength="100" placeholder="e.g. Remote or Bengaluru" autocomplete="address-level2"></label>
+            <label>Location <span class="optional">optional</span><input name="location" maxlength="100" placeholder="e.g. Remote or Bengaluru" autocomplete="off"></label>
             <label>Search area <select name="region"><option value="india">India and worldwide remote</option><option value="anywhere">Anywhere</option></select></label>
             <label>Relocation <select name="relocation"><option value="unknown">I'll decide for each job</option><option value="india">Open to relocating within India</option><option value="anywhere">Open to relocating internationally</option><option value="no">Local and remote only</option></select></label>
             <label>Experience requirements <select name="experience_flexibility"><option value="flexible">Be flexible about years of experience</option><option value="one_year">Include jobs asking for up to 1 extra year</option><option value="strict">Only jobs where I meet the stated years</option></select><small>Your resume is sent as-is; experience is never invented.</small></label>
@@ -38,8 +39,29 @@
             <label>First name <span class="required">*</span><input name="first_name" required maxlength="100" autocomplete="given-name" placeholder="First name"></label>
             <label>Last name <span class="required">*</span><input name="last_name" required maxlength="100" autocomplete="family-name" placeholder="Last name"></label>
             <label>Email <span class="required">*</span><input name="email" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com"></label>
-            <label>Phone <span class="required">*</span><input name="phone" type="tel" required minlength="5" maxlength="40" autocomplete="tel" placeholder="Your phone number"></label>
+            <label>Phone <span class="required">*</span><input name="phone" type="tel" required minlength="5" maxlength="40" autocomplete="tel" placeholder="Your phone number"><small>Include your country code when possible.</small></label>
+            <label>Current city <span class="optional">optional</span><input name="current_city" maxlength="100" autocomplete="address-level2" placeholder="Where you live now"></label>
+            <label>Country of residence <span class="optional">optional</span><input name="current_country" maxlength="100" autocomplete="country-name" placeholder="e.g. India"></label>
+            <label>Preferred first name <span class="optional">optional</span><input name="preferred_first_name" maxlength="100" autocomplete="off" placeholder="If different from your first name"></label>
+            <label>Phone country and code <span class="optional">optional</span><input name="phone_country" maxlength="200" autocomplete="off" placeholder="e.g. India +91"></label>
           </div>
+        </section>
+        <section id="memory-card" class="card">
+          <div class="section-head"><span class="step">✦</span><div><h2>Application memory</h2><p>Save your details and answer questions for future applications.</p></div></div>
+          <p class="memory-note">Saved on this computer without encryption. Your AI key is never saved. Answers are reused only for matching questions.</p>
+          <label class="consent"><input type="checkbox" name="remember_questions" checked><span>Remember my details and unanswered questions on this computer for next time.</span></label>
+          <small>Turning this off stops new saves; remove existing answers below if you no longer want them used.</small>
+          <div class="actions"><button type="button" id="memory-save-profile" class="secondary">Save my details</button><button type="button" id="memory-load" class="secondary">Load saved answers</button><button type="button" id="memory-clear" class="secondary">Clear saved memory</button></div>
+          <p id="memory-message" role="status">Enter your application email above to load or save answers.</p>
+          <div id="memory-questions"></div>
+          <details class="memory-add">
+            <summary>Add a question you already know</summary>
+            <p>Use the exact question wording. This answer may be reused for that same question at other employers and locations.</p>
+            <label>Question <input id="memory-new-label" maxlength="600" placeholder="e.g. LinkedIn profile"></label>
+            <label>Answer type <select id="memory-new-kind"><option value="text">Text</option><option value="choice">Dropdown or radio choice</option></select></label>
+            <label>Your answer <textarea id="memory-new-answer" rows="3" maxlength="2000"></textarea></label>
+            <button type="button" id="memory-add" class="secondary">Save this answer</button>
+          </details>
         </section>
         <section class="card">
           <div class="section-head"><span class="step">03</span><div><h2>Your resume and AI</h2><p>Help us check which jobs are a good fit.</p></div></div>
@@ -81,7 +103,7 @@
               </div>
             </details>
           </div>
-          <label class="consent"><input type="checkbox" name="consent" required><span id="consent-text">I want to apply automatically. My resume text and job preferences are sent to my selected AI provider for matching, and my resume and details are sent to employers for supported applications.</span></label>
+          <label class="consent"><input type="checkbox" name="consent" required><span id="consent-text">I want to apply automatically. My resume text and job preferences are sent to my selected AI provider for matching, and my resume, details, and matching saved answers are sent to employers for supported applications.</span></label>
           <p class="notice">Each search attempts up to 5 applications, checking recent jobs until the goal is reached or no more are available. AI charges may increase with more checks. If a submission cannot be confirmed, it counts toward the limit. Unsupported forms are left for your review.</p>
           <p id="error" class="error" role="alert" hidden></p>
           <p id="approval-prompt" class="notice" role="status" hidden>An application is waiting for your approval. <a href="#review-card">Review it</a></p>
@@ -96,7 +118,7 @@
           <p id="review-job" class="review-job"></p>
           <a id="review-job-link" target="_blank" rel="noopener noreferrer" hidden>View job ↗</a>
           <details class="review-details"><summary>View job description</summary><p id="review-description"></p></details>
-          <p class="review-note">Check the job and tailored resume. Approving may send a real application.</p>
+          <p class="review-note">Check the job and tailored resume. Approving may send a real application using your matching <a href="#memory-card">saved answers</a>. New required questions are collected for later.</p>
           <label>Review and edit the tailored highlights <textarea id="review-highlights" rows="6" maxlength="1205"></textarea><small>Use 1 to 6 lines. Add only skills and experience you actually have. Your original resume pages stay unchanged.</small></label>
           <details class="review-details"><summary>View original resume text</summary><p id="review-original"></p><small id="review-truncated" hidden>The full original resume is included in the PDF.</small></details>
           <p id="review-message" role="status"></p>
@@ -108,6 +130,7 @@
           <div class="progress-heading"><div><p class="eyebrow">YOUR SEARCH</p><h2>What's happening</h2></div><span id="status" class="status">Ready</span></div>
           <div id="empty" class="empty"><span aria-hidden="true">✧</span><h3>Your search starts here</h3><p>Once you start, updates and application results will appear here.</p></div>
           <ul id="events" class="events"></ul>
+          <p id="memory-prompt" class="notice" hidden>Some questions need your answers. <a href="#memory-card">Answer them for next time</a></p>
         </section>
         <div class="sidebar-note"><span aria-hidden="true">⌁</span><p><strong>You're in control.</strong><br>Your details stay on this computer until you start. You can stop after the current job.</p></div>
       </aside>

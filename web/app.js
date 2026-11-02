@@ -52,6 +52,8 @@ let reviewPreviewBusy = false;
 let reviewSequence = 0;
 let statusSequence = 0;
 let statusApplied = 0;
+let startedEmail = '';
+let runObserved = false;
 
 function updateStart() {
   start.disabled = searchRunning || starting || !connectionTicket;
@@ -204,6 +206,12 @@ async function status() {
     if (sequence < statusApplied) return;
     statusApplied = sequence;
     searchRunning = data.running;
+    if (startedEmail && data.running) runObserved = true;
+    if (startedEmail && !data.running && (runObserved || !starting)) {
+      const email = startedEmail;
+      startedEmail = '';
+      document.dispatchEvent(new CustomEvent('job-search-finished', { detail: { email } }));
+    }
     if (data.running && data.resume_mode && form.elements.resume_mode.value !== data.resume_mode) {
       const selected = [...form.elements.resume_mode].find(option => option.value === data.resume_mode);
       if (selected) {
@@ -301,7 +309,7 @@ function updateProvider() {
 function updateConsent() {
   const providerName = providers[provider.value]?.label || 'my AI provider';
   const action = form.elements.resume_mode.value === 'review' ? 'I want to review and approve each application before it is sent.' : 'I want to apply automatically.';
-  consentText.textContent = `${action} My resume text and job preferences are sent to ${providerName} for matching and, if selected, tailoring. My resume and details are sent to employers for supported applications.`;
+  consentText.textContent = `${action} My resume text and job preferences are sent to ${providerName} for matching and, if selected, tailoring. My resume, details, and matching saved answers are sent to employers for supported applications.`;
 }
 
 async function loadOptions() {
@@ -427,6 +435,8 @@ form.addEventListener('submit', async (event) => {
   updateStart();
   try {
     const data = new FormData(form);
+    data.set('remember_questions', form.elements.remember_questions.checked ? 'true' : 'false');
+    const submittedEmail = form.elements.email.value.trim();
     if (model.value === 'custom') data.set('model', customModel.value.trim());
     if (!workspace.disabled) data.set('workspace_id', workspace.value.trim());
     data.set('connection_ticket', connectionTicket);
@@ -436,6 +446,8 @@ form.addEventListener('submit', async (event) => {
       if (typeof result.detail === 'string' && result.detail.startsWith('Test your AI connection')) clearTestResult();
       throw new Error(typeof result.detail === 'string' ? result.detail : 'Please check the form and try again.');
     }
+    startedEmail = submittedEmail;
+    runObserved = false;
     await status();
   } catch (err) {
     showError(err.message || 'Could not start the search.');

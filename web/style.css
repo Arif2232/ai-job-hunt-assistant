@@ -86,5 +86,16 @@ footer span { color: #85a992; }
 .draft-tool button { margin-top: 12px; }
 .draft-tool .error { color: #a53f3a; }
 .draft-tool .model-hint { margin: 14px 0 0; }
+.memory-note, #memory-message, .memory-add p, .memory-question p { color: #63796a; font-size: 12px; line-height: 1.5; }
+#memory-message.error { color: #a53f3a; }
+.memory-question { border-top: 1px solid #eff2ed; padding: 14px 0; }
+.memory-question h3 { margin: 0 0 5px; color: #41554a; font-size: 13px; line-height: 1.4; }
+.memory-question a { display: inline-block; margin: 4px 0 8px; font-size: 12px; }
+.memory-question .actions { margin-top: 10px; }
+.memory-question .consent { margin-top: 10px; }
+.memory-add { margin-top: 18px; padding: 14px; border: 1px solid #e4e9e1; border-radius: 10px; }
+.memory-add summary { cursor: pointer; color: #456452; font-size: 13px; font-weight: 700; }
+.memory-add label { margin-top: 12px; }
+.memory-add button { margin-top: 12px; }
 .print-resume { display: none; }
 @media print { body > :not(.print-resume) { display: none !important; } .print-resume { display: block; white-space: pre-wrap; color: #000; font-size: 11pt; line-height: 1.4; } }

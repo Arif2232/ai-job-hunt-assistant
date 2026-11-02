@@ -114,7 +114,7 @@ def ai_error_message(error):
 
 
 async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str, ledger, report, stop,
-                   *, provider='openai', model='', workspace_id='', request_review=None):
+                   *, provider='openai', model='', workspace_id='', request_review=None, memory=None):
     model = selected_model(provider, model)
     resume_mode = candidate.get('resume_mode', 'original')
     if resume_mode == 'review' and request_review is None:
@@ -231,7 +231,7 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                                 return
                         page = await browser.new_page()
                         try:
-                            status, message = await apply_to_job(page, job, candidate, application_resume, ledger)
+                            status, message = await apply_to_job(page, job, candidate, application_resume, ledger, memory=memory)
                         finally:
                             await page.close()
                     finally:
