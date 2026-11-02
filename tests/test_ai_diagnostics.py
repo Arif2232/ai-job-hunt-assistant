@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from app import runner
 from app.matching import Decision
@@ -17,6 +18,18 @@ def job(identifier):
                published_at=datetime.now(UTC) - timedelta(hours=int(identifier)),
                url=f'https://job-boards.greenhouse.io/example/jobs/{identifier}',
                apply_url=f'https://job-boards.greenhouse.io/example/jobs/{identifier}')
+
+
+@pytest.mark.parametrize('data,expected', [
+    ('{"suitable":', 'incomplete or malformed'),
+    ('{"suitable":"yes","reason":"example"}', 'unexpected format'),
+])
+def test_response_format_errors_are_distinguished_without_exposing_contents(data, expected):
+    with pytest.raises(ValidationError) as raised:
+        Decision.model_validate_json(data)
+    message = runner.ai_error_message(raised.value)
+    assert expected in message
+    assert data not in message
 
 
 @pytest.fixture

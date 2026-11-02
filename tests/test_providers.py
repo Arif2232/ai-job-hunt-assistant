@@ -15,6 +15,11 @@ def job():
                apply_url='https://job-boards.greenhouse.io/example/jobs/123')
 
 
+def test_long_reason_does_not_discard_an_otherwise_valid_decision():
+    decision = Decision(suitable=True, reason='x' * 400)
+    assert decision.suitable is True and len(decision.reason) == 280
+
+
 async def test_openai_selection_and_reasoning_configuration():
     class Responses:
         async def parse(self, **kwargs):

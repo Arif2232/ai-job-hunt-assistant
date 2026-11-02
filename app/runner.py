@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 from openai import AsyncOpenAI
 from playwright.async_api import async_playwright
+from pydantic import ValidationError
 
 from app.apply import apply_to_job, matches_job
 from app.matching import ai_match, selected_model
@@ -98,8 +99,13 @@ def ai_error_message(error):
         return 'The AI provider timed out. Check your connection and try again.'
     if isinstance(error, httpx.ConnectError) or type(error).__name__ == 'APIConnectionError':
         return 'Could not connect to the AI provider. Check your internet connection.'
+    if isinstance(error, ValidationError):
+        errors = error.errors(include_url=False, include_context=False, include_input=False)
+        if any(item['type'] == 'json_invalid' for item in errors):
+            return 'The AI returned incomplete or malformed data. Try another model or retry.'
+        return 'The AI returned data in an unexpected format. Try another model or retry.'
     if isinstance(error, ValueError):
-        return 'The AI returned an incomplete response. Try another model or retry.'
+        return 'The AI did not return a usable answer. Try another model or retry.'
     return 'AI matching failed. Check your API key, model access, and connection, then try again.'
 
 
@@ -141,12 +147,12 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                     try:
                         decision = await ai_match(client, job, resume_text, candidate['role'], candidate['location'],
                                                   provider=provider, model=model, api_key=api_key, workspace_id=workspace_id)
-                    except ValueError:
+                    except ValueError as exc:
                         invalid_responses += 1
                         needs_review += 1
                         report('needs_attention', 'AI could not evaluate this job. You can review it manually.', job)
                         if invalid_responses >= 3:
-                            report('error', 'AI returned several incomplete responses. Try another model or retry.')
+                            report('error', 'Several jobs could not be evaluated. ' + ai_error_message(exc))
                             return
                         continue
                     except Exception as exc:
