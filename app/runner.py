@@ -39,6 +39,7 @@ SOURCES = {
         Board(name='ElevenLabs', board='elevenlabs'), Board(name='Linear', board='linear'),
     ],
 }
+MAX_JOBS_TO_REVIEW = 100
 
 
 def title_matches(title: str, requested: str) -> bool:
@@ -132,7 +133,7 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
     if not jobs:
         report('done', 'No recent jobs with verified dates matched your search. Try a broader title or location.')
         return
-    report('searching', f'Found {len(jobs)} recent jobs. AI will check the newest 20 against your resume.')
+    report('searching', f'Found {len(jobs)} recent jobs. AI will check up to the newest {min(len(jobs), MAX_JOBS_TO_REVIEW)} against your resume.')
     attempts = 0
     confirmed = 0
     needs_review = 0
@@ -142,7 +143,7 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
             browser = None
             try:
                 invalid_responses = 0
-                for job in jobs[:20]:
+                for job in jobs[:MAX_JOBS_TO_REVIEW]:
                     if stop.is_set() or attempts >= candidate['max_applications']:
                         break
                     report('reviewing', f'Checking {job.title} at {job.company}.', job)
@@ -162,7 +163,8 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                         return
                     invalid_responses = 0
                     if not decision.suitable:
-                        report('skipped', 'Not a close enough match.', job)
+                        reason = decision.reason.strip()
+                        report('skipped', f'Not a close enough match. {reason}' if reason else 'Not a close enough match.', job)
                         continue
                     if stop.is_set():
                         break

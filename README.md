@@ -19,7 +19,7 @@ You choose when a search starts. The app shows what happened, highlights applica
 ## What you can do
 
 - **Discover recent jobs:** prioritize listings from the last 30 days with a verified posting date. Start with India and worldwide remote roles, or search more widely.
-- **Check the fit:** use your own OpenAI, Gemini, or Claude API key and choose a suggested model or another model ID.
+- **Check the fit:** use your own OpenAI, Gemini, or Claude API key and choose a suggested model or another model ID. The app checks up to 100 jobs per search; API charges increase with usage.
 - **Apply where supported:** submit up to 10 straightforward applications per search using your contact details and existing resume.
 - **Stay informed:** see progress, open jobs that need manual attention, and avoid automatically retrying an uncertain or previously attempted submission.
 

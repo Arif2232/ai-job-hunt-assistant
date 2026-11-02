@@ -28,6 +28,8 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
             assert await page.locator('#model').input_value() == 'gpt-6-luna'
             assert await page.locator('input[name="max_applications"]').count() == 0
             assert await page.get_by_text('Each search attempts up to 10 applications', exact=False).is_visible()
+            assert await page.get_by_text('AI checks up to 100 jobs', exact=False).is_visible()
+            assert await page.get_by_text('More checks can increase API charges', exact=False).is_visible()
             await page.locator('input[name="api_key"]').fill('dummy-key-not-real')
             await page.locator('input[name="consent"]').check()
             await page.select_option('#provider', 'gemini')

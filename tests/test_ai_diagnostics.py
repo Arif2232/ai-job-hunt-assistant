@@ -130,3 +130,37 @@ async def test_repeated_unusable_ai_responses_stop_before_wasting_more_requests(
                           isolated_hunt['ledger'], lambda *args: events.append(args), asyncio.Event())
     assert len(calls) == 3
     assert events[-1][0] == 'error'
+
+
+async def test_search_keeps_checking_after_twenty_jobs_until_it_finds_a_match(isolated_hunt, monkeypatch):
+    applied = []
+    async def discover(*args, **kwargs): return [job(str(i)) for i in range(1, 23)]
+    async def match(client, item, *args, **kwargs):
+        return Decision(suitable=item.source_id == '21', reason='Example reason')
+    async def apply(page, item, *args):
+        applied.append(item.source_id)
+        return 'submitted', 'Confirmed'
+    isolated_hunt['candidate']['max_applications'] = 1
+    monkeypatch.setattr(runner.greenhouse, 'discover', discover)
+    monkeypatch.setattr(runner, 'ai_match', match)
+    monkeypatch.setattr(runner, 'apply_to_job', apply)
+    events = []
+    await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
+                          isolated_hunt['ledger'], lambda *args: events.append(args), asyncio.Event())
+    assert applied == ['21']
+    assert any(event[0] == 'skipped' and 'Example reason' in event[1] for event in events)
+
+
+async def test_search_caps_ai_checks(isolated_hunt, monkeypatch):
+    checked = []
+    async def discover(*args, **kwargs): return [job(str(i)) for i in range(1, 102)]
+    async def match(client, item, *args, **kwargs):
+        checked.append(item.source_id)
+        return Decision(suitable=False, reason='Example reason')
+    monkeypatch.setattr(runner.greenhouse, 'discover', discover)
+    monkeypatch.setattr(runner, 'ai_match', match)
+    events = []
+    await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
+                          isolated_hunt['ledger'], lambda *args: events.append(args), asyncio.Event())
+    assert len(checked) == 100
+    assert any(event[0] == 'searching' and 'newest 100' in event[1] for event in events)
