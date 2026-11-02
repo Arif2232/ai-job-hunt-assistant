@@ -177,3 +177,15 @@ async def test_ai_receives_the_selected_search_area_when_no_location_is_entered(
     await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
                           isolated_hunt['ledger'], lambda *args: None, asyncio.Event())
     assert seen and all(value == location for value in seen)
+
+
+async def test_ai_receives_the_users_application_preferences(isolated_hunt, monkeypatch):
+    seen = []
+    async def match(*args, **kwargs):
+        seen.append(kwargs)
+        return Decision(suitable=False, reason='Example reason')
+    isolated_hunt['candidate'].update(relocation='india', experience_flexibility='one_year')
+    monkeypatch.setattr(runner, 'ai_match', match)
+    await runner.run_hunt(isolated_hunt['candidate'], isolated_hunt['resume'], 'Example resume', 'dummy-secret-key',
+                          isolated_hunt['ledger'], lambda *args: None, asyncio.Event())
+    assert seen and all(item['relocation'] == 'india' and item['experience_flexibility'] == 'one_year' for item in seen)

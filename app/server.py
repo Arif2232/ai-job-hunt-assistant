@@ -40,6 +40,8 @@ class Candidate(BaseModel):
     role: str = Field(min_length=2, max_length=100)
     location: str = Field(default='', max_length=100)
     region: Literal['india', 'anywhere'] = 'india'
+    relocation: Literal['unknown', 'india', 'anywhere', 'no'] = 'unknown'
+    experience_flexibility: Literal['strict', 'one_year'] = 'strict'
     max_applications: int = Field(default=10, ge=1, le=10)
 
     @field_validator('first_name', 'last_name', 'email', 'phone', 'role', 'location', mode='before')
@@ -166,6 +168,7 @@ async def test_ai_connection(provider: str = Form('openai'), model: str = Form('
 async def start(
     first_name: str = Form(...), last_name: str = Form(...), email: str = Form(...),
     phone: str = Form(...), role: str = Form(...), location: str = Form(''), region: str = Form('india'),
+    relocation: str = Form('unknown'), experience_flexibility: str = Form('strict'),
     max_applications: int = Form(10), api_key: str = Form(...), consent: bool = Form(False),
     provider: str = Form('openai'), model: str = Form(''), workspace_id: str = Form(''),
     resume: UploadFile = File(...), x_app_token: str | None = Header(default=None),
@@ -178,7 +181,8 @@ async def start(
             raise HTTPException(status_code=400, detail='Please confirm before starting automatic applications.')
         try:
             candidate = Candidate(first_name=first_name, last_name=last_name, email=email, phone=phone,
-                                  role=role, location=location, region=region, max_applications=max_applications).model_dump()
+                                  role=role, location=location, region=region, relocation=relocation,
+                                  experience_flexibility=experience_flexibility, max_applications=max_applications).model_dump()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail='Please check your contact details, job title, and application limit.') from exc
         model = validate_ai_settings(provider, model, workspace_id, api_key)

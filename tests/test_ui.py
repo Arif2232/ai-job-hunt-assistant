@@ -30,6 +30,8 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
             assert await page.get_by_text('Each search attempts up to 10 applications', exact=False).is_visible()
             assert await page.get_by_text('AI checks up to 100 jobs', exact=False).is_visible()
             assert await page.get_by_text('More checks can increase API charges', exact=False).is_visible()
+            assert await page.locator('select[name="relocation"]').input_value() == 'unknown'
+            assert await page.locator('select[name="experience_flexibility"]').input_value() == 'one_year'
             await page.locator('input[name="api_key"]').fill('dummy-key-not-real')
             await page.locator('input[name="consent"]').check()
             await page.select_option('#provider', 'gemini')
@@ -47,6 +49,8 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
                                 'email': 'candidate@example.com', 'phone': '1234567890',
                                 'api_key': 'dummy-test-key-only'}.items():
                 await page.locator(f'input[name="{name}"]').fill(value)
+            await page.select_option('select[name="relocation"]', 'india')
+            await page.select_option('select[name="experience_flexibility"]', 'one_year')
             await page.locator('input[name="resume"]').set_input_files({
                 'name': 'resume.pdf', 'mimeType': 'application/pdf', 'buffer': b'%PDF-test',
             })
@@ -71,6 +75,7 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch():
                 await page.locator('#start').click()
             await expect(page.locator('#start')).to_be_enabled()
             assert len(sent) == 1 and 'dummy-test-key-only' in sent[0]
+            assert 'relocation' in sent[0] and 'india' in sent[0] and 'one_year' in sent[0]
             assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
             await page.route('**/api/status', lambda route: route.fulfill(
                 status=200, content_type='application/json', body='{"running":false,"events":[{"kind":"skipped","message":"Not a close match","url":"https://job-boards.greenhouse.io/example/jobs/123"},{"kind":"error","message":"AI failed"}]}'))

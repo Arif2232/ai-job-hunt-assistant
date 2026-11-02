@@ -33,6 +33,23 @@ async def test_openai_selection_and_reasoning_configuration():
     assert client.responses.args['store'] is False
 
 
+async def test_ai_receives_relocation_and_experience_preferences():
+    class Responses:
+        async def parse(self, **kwargs):
+            self.args = kwargs
+            return type('Result', (), {'output_parsed': Decision(suitable=True, reason='Example match')})()
+    client = type('Client', (), {'responses': Responses()})()
+    await ai_match(client, job(), 'Example experience', 'Engineer', 'India',
+                   relocation='india', experience_flexibility='one_year')
+    payload = json.loads(client.responses.args['input'][1]['content'])
+    assert payload['relocation'] == 'india' and payload['experience_flexibility'] == 'one_year'
+    from datetime import date
+    assert date.fromisoformat(payload['current_date']) == date.today()
+    instructions = client.responses.args['input'][0]['content']
+    assert 'one year' in instructions and 'different Indian city' in instructions
+    assert 'not proof of work authorization' in instructions
+
+
 async def test_gemini_receives_selected_model_and_returns_validated_decision():
     def handler(request):
         assert request.url.host == 'generativelanguage.googleapis.com'

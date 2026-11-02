@@ -150,7 +150,9 @@ async def run_hunt(candidate: dict, resume: Path, resume_text: str, api_key: str
                     report('reviewing', f'Checking {job.title} at {job.company}.', job)
                     try:
                         decision = await ai_match(client, job, resume_text, candidate['role'], requested_location,
-                                                  provider=provider, model=model, api_key=api_key, workspace_id=workspace_id)
+                                                  provider=provider, model=model, api_key=api_key, workspace_id=workspace_id,
+                                                  relocation=candidate.get('relocation', 'unknown'),
+                                                  experience_flexibility=candidate.get('experience_flexibility', 'strict'))
                     except ValueError as exc:
                         invalid_responses += 1
                         needs_review += 1
