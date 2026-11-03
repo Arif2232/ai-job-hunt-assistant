@@ -22,6 +22,7 @@ from openai import AsyncOpenAI
 from app.matching import PROVIDERS, ai_match, selected_model
 from app.memory import AnswerMemory
 from app.runner import ai_error_message, run_hunt
+from app.settings import LocalSettings
 from app.storage import ApplicationLog
 from app.tailoring import make_tailored_pdf, resume_draft
 from src.models import Job
@@ -72,7 +73,7 @@ class Candidate(BaseModel):
 
 
 def verify_token(value: str | None):
-    if not value or not hmac.compare_digest(value, TOKEN):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{32,64}', value) or not hmac.compare_digest(value, TOKEN):
         raise HTTPException(status_code=403, detail='Refresh the page and try again.')
 
 
@@ -108,6 +109,26 @@ def memory_call(method, *args):
         raise HTTPException(status_code=500, detail='Could not access saved answers on this computer.') from exc
 
 
+def settings_call(method, *args):
+    try:
+        return getattr(LocalSettings(DATA), method)(*args)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=500, detail='Could not access saved settings on this computer.') from exc
+
+
+def resolve_api_key(provider, api_key):
+    if api_key.strip():
+        return api_key.strip()
+    if provider not in PROVIDERS:
+        raise HTTPException(status_code=400, detail='Choose an AI provider.')
+    saved = settings_call('credential', provider)
+    if not saved:
+        raise HTTPException(status_code=400, detail='Enter your AI provider API key.')
+    return saved['api_key']
+
+
 def resume_text(content: bytes) -> str:
     if not content.startswith(b'%PDF-') or len(content) > 5_000_000:
         raise ValueError('Choose a PDF resume smaller than 5 MB.')
@@ -123,6 +144,26 @@ def resume_text(content: bytes) -> str:
     if len(text) < 50:
         raise ValueError('The PDF needs selectable text. Scanned images are not supported yet.')
     return text
+
+
+async def application_resume(email, upload, digest):
+    if upload is None:
+        saved = settings_call('resume', email)
+        if not saved:
+            raise HTTPException(status_code=400, detail='Choose a resume for this email address.')
+        content = saved['content']
+        actual = hashlib.sha256(content).hexdigest()
+        if not re.fullmatch(r'[0-9a-f]{64}', digest) or not hmac.compare_digest(digest, actual):
+            raise HTTPException(status_code=409, detail='Your saved resume changed. Review the current resume before continuing.')
+    else:
+        try:
+            content = await upload.read(5_000_001)
+        finally:
+            await upload.close()
+    try:
+        return content, resume_text(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def report(kind, message, job=None):
@@ -194,11 +235,12 @@ def update_review_pdf(pending, text):
 
 @app.middleware('http')
 async def local_headers(request: Request, call_next):
-    if request.method == 'POST' and (request.url.path.startswith('/api/memory/') or request.url.path in ('/api/start', '/api/test-ai', '/api/tailor-resume', '/api/review', '/api/review-preview')):
+    if request.method == 'POST' and (request.url.path.startswith(('/api/memory/', '/api/settings/')) or request.url.path in ('/api/start', '/api/test-ai', '/api/tailor-resume', '/api/review', '/api/review-preview')):
         try:
             if 'content-length' not in request.headers:
                 return HTMLResponse('A content length is required.', status_code=411)
-            limit = 20_000 if request.url.path.startswith('/api/memory/') else 10_000 if request.url.path in ('/api/test-ai', '/api/review', '/api/review-preview') else 5_500_000
+            limit = (5_500_000 if request.url.path in ('/api/start', '/api/tailor-resume', '/api/settings/resume') else
+                     10_000 if request.url.path in ('/api/test-ai', '/api/review', '/api/review-preview') else 20_000)
             if int(request.headers['content-length']) > limit:
                 return HTMLResponse('Request is too large.', status_code=413)
         except ValueError:
@@ -221,6 +263,88 @@ async def options(x_app_token: str | None = Header(default=None)):
     return PROVIDERS
 
 
+@app.get('/api/settings/preferences')
+async def preferences(x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    return settings_call('preferences')
+
+
+@app.post('/api/settings/preferences')
+async def update_preferences(request: Request, x_app_token: str | None = Header(default=None)):
+    try:
+        changes = await request.json()
+    except (ValueError, UnicodeError) as exc:
+        raise HTTPException(status_code=400, detail='Check the settings you are saving.') from exc
+    body_token = changes.pop('_token', '') if isinstance(changes, dict) else ''
+    verify_token(x_app_token or body_token)
+    if isinstance(changes, dict) and 'changes' in changes:
+        if set(changes) != {'changes', 'client_id', 'revisions'}:
+            raise HTTPException(status_code=400, detail='Check the settings you are saving.')
+        settings_call('update_preferences', changes['changes'], changes['client_id'], changes['revisions'])
+    else:
+        settings_call('update_preferences', changes)
+    return {'message': 'Settings saved on this computer.'}
+
+
+@app.post('/api/settings/credential-status')
+async def credential_status(provider: str = Form(...), model: str = Form(''), workspace_id: str = Form(''),
+                            x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    if provider not in PROVIDERS:
+        raise HTTPException(status_code=400, detail='Choose an AI provider.')
+    saved = settings_call('credential', provider)
+    if not saved:
+        return {'saved': False, 'verified': False}
+    try:
+        model = validate_ai_settings(provider, model, workspace_id, saved['api_key'])
+    except HTTPException:
+        return {'saved': True, 'verified': False, 'saved_model': saved['model'], 'saved_workspace_id': saved['workspace_id']}
+    verified = model == saved['model'] and workspace_id == saved['workspace_id']
+    return {'saved': True, 'verified': verified,
+            'saved_model': saved['model'], 'saved_workspace_id': saved['workspace_id'],
+            'verification': make_connection_ticket(provider, model, workspace_id, saved['api_key']) if verified else ''}
+
+
+@app.post('/api/settings/credential')
+async def save_credential(provider: str = Form(...), model: str = Form(''), workspace_id: str = Form(''),
+                          api_key: str = Form(''), connection_ticket: str = Form(''),
+                          x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    api_key = resolve_api_key(provider, api_key)
+    model = validate_ai_settings(provider, model, workspace_id, api_key)
+    verify_connection(provider, model, workspace_id, api_key, connection_ticket)
+    settings_call('save_credential', provider, api_key, model, workspace_id)
+    return {'message': 'Connected. Your key is saved on this computer.', 'verification': connection_ticket}
+
+
+@app.post('/api/settings/credential-remove')
+async def remove_credential(provider: str = Form(...), x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    settings_call('remove_credential', provider)
+    return {'message': 'Saved key removed.'}
+
+
+@app.post('/api/settings/resume-info')
+async def saved_resume_info(email: str = Form(...), x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    return settings_call('resume_info', email)
+
+
+@app.post('/api/settings/resume')
+async def save_resume(email: str = Form(...), resume: UploadFile = File(...),
+                      x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token)
+    try:
+        content = await resume.read(5_000_001)
+        resume_text(content)
+        result = settings_call('save_resume', email, resume.filename, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await resume.close()
+    return result | {'message': 'Resume saved on this computer.'}
+
+
 @app.post('/api/memory/list')
 async def list_memory(email: str = Form(...), x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
@@ -231,11 +355,34 @@ async def list_memory(email: str = Form(...), x_app_token: str | None = Header(d
 async def save_memory_profile(email: str = Form(...), first_name: str = Form(''), last_name: str = Form(''),
                               phone: str = Form(''), current_city: str = Form(''), current_country: str = Form(''),
                               preferred_first_name: str = Form(''), phone_country: str = Form(''),
+                              client_id: str = Form(''), revisions: str = Form(''),
                               x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
     profile = {'first_name': first_name, 'last_name': last_name, 'phone': phone, 'current_city': current_city,
                'current_country': current_country, 'preferred_first_name': preferred_first_name, 'phone_country': phone_country}
-    memory_call('save_profile', email, profile)
+    if client_id or revisions:
+        try:
+            versions = json.loads(revisions)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail='Check your saved application details.') from exc
+        memory_call('update_profile', email, profile, client_id, versions)
+    else:
+        memory_call('save_profile', email, profile)
+    return {'message': 'Your details are saved on this computer.'}
+
+
+@app.post('/api/memory/profile-fields')
+async def update_memory_profile(email: str = Form(...), fields: str = Form(...),
+                                client_id: str = Form(''), revisions: str = Form(''),
+                                body_token: str = Form('', alias='_token'),
+                                x_app_token: str | None = Header(default=None)):
+    verify_token(x_app_token or body_token)
+    try:
+        changes = json.loads(fields)
+        versions = json.loads(revisions) if revisions else None
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail='Check your saved application details.') from exc
+    memory_call('update_profile', email, changes, client_id, versions)
     return {'message': 'Your details are saved on this computer.'}
 
 
@@ -341,9 +488,10 @@ async def review_decision(review_id: str = Form(...), action: str = Form(...),
 
 @app.post('/api/test-ai')
 async def test_ai_connection(provider: str = Form('openai'), model: str = Form(''),
-                             api_key: str = Form(...), workspace_id: str = Form(''),
+                             api_key: str = Form(''), workspace_id: str = Form(''),
                              x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
+    api_key = resolve_api_key(provider, api_key)
     model = validate_ai_settings(provider, model, workspace_id, api_key)
     example = Job(source='greenhouse', source_id='connection-test', board='example', company='Example',
                   title='Customer Support Specialist', description='Help customers with everyday questions.',
@@ -362,19 +510,16 @@ async def test_ai_connection(provider: str = Form('openai'), model: str = Form('
 
 @app.post('/api/tailor-resume')
 async def tailor_resume(description: str = Form(...), provider: str = Form('openai'), model: str = Form(''),
-                        api_key: str = Form(...), workspace_id: str = Form(''), connection_ticket: str = Form(''),
-                        resume: UploadFile = File(...), x_app_token: str | None = Header(default=None)):
+                        api_key: str = Form(''), workspace_id: str = Form(''), connection_ticket: str = Form(''),
+                        email: str = Form(''), resume_digest: str = Form(''), resume: UploadFile | None = File(default=None),
+                        x_app_token: str | None = Header(default=None)):
     verify_token(x_app_token)
+    api_key = resolve_api_key(provider, api_key)
     model = validate_ai_settings(provider, model, workspace_id, api_key)
     verify_connection(provider, model, workspace_id, api_key, connection_ticket)
     if not 20 <= len(description.strip()) <= 16000:
         raise HTTPException(status_code=400, detail='Paste a job description between 20 and 16,000 characters.')
-    try:
-        text = resume_text(await resume.read(5_000_001))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    finally:
-        await resume.close()
+    _, text = await application_resume(email, resume, resume_digest)
     try:
         client = AsyncOpenAI(api_key=api_key.strip(), timeout=60, max_retries=1) if provider == 'openai' else httpx.AsyncClient(timeout=60)
         async with client:
@@ -393,10 +538,10 @@ async def start(
     phone_country: str = Form(''), remember_questions: bool = Form(True),
     relocation: str = Form('unknown'), experience_flexibility: str = Form('strict'),
     resume_mode: str = Form('original'),
-    max_applications: int = Form(5), api_key: str = Form(...), consent: bool = Form(False),
+    max_applications: int = Form(5), api_key: str = Form(''), consent: bool = Form(False),
     provider: str = Form('openai'), model: str = Form(''), workspace_id: str = Form(''),
-    connection_ticket: str = Form(''),
-    resume: UploadFile = File(...), x_app_token: str | None = Header(default=None),
+    connection_ticket: str = Form(''), resume_digest: str = Form(''),
+    resume: UploadFile | None = File(default=None), x_app_token: str | None = Header(default=None),
 ):
     verify_token(x_app_token)
     async with START_LOCK:
@@ -414,15 +559,10 @@ async def start(
                                   max_applications=max_applications).model_dump()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail='Please check your contact details, job title, and application limit.') from exc
+        api_key = resolve_api_key(provider, api_key)
         model = validate_ai_settings(provider, model, workspace_id, api_key)
         verify_connection(provider, model, workspace_id, api_key, connection_ticket)
-        try:
-            content = await resume.read(5_000_001)
-            text = resume_text(content)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        finally:
-            await resume.close()
+        content, text = await application_resume(candidate['email'], resume, resume_digest)
         DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
         DATA.chmod(0o700)
         try:

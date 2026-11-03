@@ -11,7 +11,10 @@ from pypdf import PdfWriter
 from app.server import app
 
 
-async def test_each_review_requires_an_individual_decision():
+async def test_each_review_requires_an_individual_decision(tmp_path, monkeypatch):
+    from app import server as app_server
+
+    monkeypatch.setattr(app_server, 'DATA', tmp_path)
     listener = socket.socket()
     listener.bind(('127.0.0.1', 0))
     listener.listen(32)

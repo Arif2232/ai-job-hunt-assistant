@@ -94,8 +94,9 @@ async def test_saved_answers_can_be_edited_individually_without_saving_the_ai_ke
             await asyncio.wait_for(profile_started.wait(), timeout=2)
             await page.locator('input[name="current_city"]').fill('Latest Example City')
             release_profile.set()
-            await expect(page.locator('#memory-message')).to_contain_text('Save again')
-            assert memory.profile(email)['current_city'] == 'New Example City'
+            await expect(page.locator('#memory-message')).to_contain_text('automatically')
+            await page.evaluate('window.flushApplicationDetails()')
+            assert memory.profile(email)['current_city'] == 'Latest Example City'
             await page.unroute('**/api/memory/profile', delayed_profile)
             await page.locator('#memory-save-profile').click()
             await expect(page.locator('#memory-message')).to_contain_text('saved on this computer')
@@ -121,7 +122,7 @@ async def test_saved_answers_can_be_edited_individually_without_saving_the_ai_ke
             await expect(second.locator('input[name="first_name"]')).to_have_value('')
             await expect(second.locator('input[name="current_city"]')).to_have_value('')
             await second.locator('#memory-save-profile').click()
-            await expect(second.locator('#memory-message')).to_contain_text('Select “Save my details”')
+            await expect(second.locator('#memory-message')).to_contain_text('Select “Save my details now”')
             assert memory.profile('other@example.com')['current_city'] == 'Other City'
             await row.locator('summary').click()
             await row.get_by_role('button', name='Remove').click()
@@ -191,7 +192,7 @@ async def test_new_questions_are_shown_when_a_search_finishes(tmp_path, monkeypa
             await page.locator('#memory-prompt a').click()
             await expect(page.locator('#memory-manage')).to_have_attribute('open', '')
             await expect(page.locator('.memory-question').filter(has_text='Notice period?')).to_be_visible()
-            assert await page.locator('input[name="api_key"]').input_value() == 'dummy-ai-key-not-real'
+            assert await page.locator('input[name="api_key"]').input_value() == ''
             await browser.close()
     finally:
         service.should_exit = True

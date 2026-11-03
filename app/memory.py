@@ -83,6 +83,9 @@ class AnswerMemory:
         self.path.chmod(0o600)
         with self.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS profiles (applicant TEXT PRIMARY KEY, details TEXT NOT NULL)')
+            db.execute('''CREATE TABLE IF NOT EXISTS profile_versions (
+                applicant TEXT NOT NULL, field TEXT NOT NULL, client TEXT NOT NULL, revision INTEGER NOT NULL,
+                PRIMARY KEY(applicant, field, client))''')
             db.execute('''CREATE TABLE IF NOT EXISTS questions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, applicant TEXT NOT NULL, scope TEXT NOT NULL,
                 normalized TEXT NOT NULL, label TEXT NOT NULL, kind TEXT NOT NULL, options TEXT NOT NULL,
@@ -116,19 +119,36 @@ class AnswerMemory:
 
     def remember_profile(self, email, profile):
         details = {key: value for key, value in clean_profile(profile).items() if value}
+        self.update_profile(email, details)
+
+    def update_profile(self, email, profile, client_id='', revisions=None):
+        details = clean_profile(profile)
+        if client_id or revisions is not None:
+            if (not re.fullmatch(r'[0-9a-f]{32}', client_id or '') or not isinstance(revisions, dict) or
+                    set(revisions) != set(details) or any(type(value) is not int or not 1 <= value <= 2**53 for value in revisions.values())):
+                raise ValueError('Check the saved application details.')
         owner = applicant(email)
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT details FROM profiles WHERE applicant = ?', (owner,)).fetchone()
             previous = json.loads(row['details']) if row else {}
-            previous.update(details)
+            for name, value in details.items():
+                if client_id:
+                    updated = db.execute('''INSERT INTO profile_versions(applicant, field, client, revision) VALUES (?, ?, ?, ?)
+                        ON CONFLICT(applicant, field, client) DO UPDATE SET revision=excluded.revision
+                        WHERE excluded.revision > profile_versions.revision''', (owner, name, client_id, revisions[name])).rowcount
+                    if not updated:
+                        continue
+                previous[name] = value
             db.execute('INSERT INTO profiles(applicant, details) VALUES (?, ?) '
                        'ON CONFLICT(applicant) DO UPDATE SET details=excluded.details',
                        (owner, json.dumps(previous, ensure_ascii=False)))
 
     def delete_profile(self, email):
+        owner = applicant(email)
         with self.connect() as db:
-            db.execute('DELETE FROM profiles WHERE applicant = ?', (applicant(email),))
+            db.execute('DELETE FROM profiles WHERE applicant = ?', (owner,))
+            db.execute('DELETE FROM profile_versions WHERE applicant = ?', (owner,))
 
     def record_questions(self, email, job, questions):
         owner = applicant(email)
@@ -215,6 +235,7 @@ class AnswerMemory:
         owner = applicant(email)
         with self.connect() as db:
             db.execute('DELETE FROM profiles WHERE applicant = ?', (owner,))
+            db.execute('DELETE FROM profile_versions WHERE applicant = ?', (owner,))
             db.execute('DELETE FROM questions WHERE applicant = ?', (owner,))
 
     def lookup(self, email, job, question):

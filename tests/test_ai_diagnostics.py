@@ -465,7 +465,7 @@ async def test_review_mode_from_ui_to_mock_submission(isolated_hunt, monkeypatch
             await expect(page.locator('#review-card')).to_be_hidden()
             await asyncio.wait_for(server.state['task'], timeout=2)
             assert len(applied) == 1 and not list((tmp_path / 'app-data').rglob('*.pdf'))
-            assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
+            assert await page.locator('input[name="api_key"]').input_value() == ''
             await browser.close()
     finally:
         service.should_exit = True

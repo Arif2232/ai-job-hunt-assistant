@@ -9,17 +9,19 @@
   <link rel="stylesheet" href="/assets/style.css">
   <script src="/assets/app.js" defer></script>
   <script src="/assets/memory.js" defer></script>
+  <script src="/assets/persistence.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="/"><span class="brand-icon" aria-hidden="true">✦</span> Job Hunt Assistant</a>
-    <span class="local-badge"><span aria-hidden="true"></span> Your personal workspace</span>
+    <div class="header-actions"><span class="local-badge"><span aria-hidden="true"></span> Your personal workspace</span><button type="button" id="open-settings" class="settings-button"><span aria-hidden="true">⚙</span> Settings</button></div>
   </header>
   <main class="page">
     <section class="intro">
       <p class="eyebrow">A LITTLE HELP WITH THE BIG SEARCH</p>
       <h1>Let's find your<br><em>next opportunity.</em></h1>
       <p>Tell us what you're looking for. We'll search, check your fit, and apply to supported jobs for you.</p>
+      <p id="settings-save-error" class="error" role="alert" hidden></p>
     </section>
     <div class="layout">
       <form id="setup" class="setup" novalidate>
@@ -38,7 +40,7 @@
           <div class="fields two">
             <label>First name <span class="required">*</span><input name="first_name" required maxlength="100" autocomplete="given-name" placeholder="First name"></label>
             <label>Last name <span class="required">*</span><input name="last_name" required maxlength="100" autocomplete="family-name" placeholder="Last name"></label>
-            <label>Email <span class="required">*</span><input name="email" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com"></label>
+            <label>Email <span class="required">*</span><input name="email" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com"><small>We use this to keep your details and resume together.</small></label>
             <label>Phone <span class="required">*</span><input name="phone" type="tel" required minlength="5" maxlength="40" autocomplete="tel" placeholder="Your phone number"><small>Include your country code when possible.</small></label>
             <label>Current city <span class="optional">optional</span><input name="current_city" maxlength="100" autocomplete="address-level2" placeholder="Where you live now"></label>
             <label>Country of residence <span class="optional">optional</span><input name="current_country" maxlength="100" autocomplete="country-name" placeholder="e.g. India"></label>
@@ -48,11 +50,11 @@
         </section>
         <section id="memory-card" class="card memory-card">
           <div class="section-head"><span class="step">✦</span><div><h2>Saved answers</h2><p>A little less to fill in next time.</p></div></div>
-          <p id="memory-intro" class="memory-intro">We save your details when you search. Afterward, answer any missing questions here and we'll remember them for matching applications.</p>
+          <p id="memory-intro" class="memory-intro">We save your details for next time. After a search, answer any missing questions here for future applications.</p>
           <label class="consent"><input type="checkbox" name="remember_questions" checked><span>Automatically remember my details and questions</span></label>
           <small id="memory-paused-note" hidden>New details and questions won't be saved automatically. Previously saved answers can still be used.</small>
-          <div class="memory-actions"><button type="button" id="memory-save-profile" class="secondary">Save my details</button><p id="memory-message" role="status"></p></div>
-          <p class="memory-note">Saved on this computer without encryption. Your AI key is never saved.</p>
+          <p id="memory-message" role="status"></p>
+          <p class="memory-note">Your details and answers are saved on this computer without encryption.</p>
           <details id="memory-manage" class="memory-manage">
             <summary><span>Questions &amp; saved answers</span><span id="memory-count"></span></summary>
             <div class="memory-content">
@@ -65,14 +67,18 @@
                 <label>Your answer <textarea id="memory-new-answer" rows="3" maxlength="2000"></textarea></label>
                 <button type="button" id="memory-add" class="secondary">Save this answer</button>
               </details>
-              <button type="button" id="memory-load" class="memory-refresh">Refresh answers</button>
+              <div class="memory-tools"><button type="button" id="memory-save-profile" class="memory-refresh">Save my details now</button><button type="button" id="memory-load" class="memory-refresh">Refresh answers</button></div>
             </div>
           </details>
         </section>
         <section class="card">
           <div class="section-head"><span class="step">03</span><div><h2>Your resume and AI</h2><p>Help us check which jobs are a good fit.</p></div></div>
           <div class="fields">
-            <label>Resume <span class="required">*</span><input name="resume" type="file" accept="application/pdf,.pdf" required><small>PDF with selectable text, up to 5 MB.</small></label>
+            <div>
+              <div id="saved-resume" class="saved-resume" hidden><div><strong id="saved-resume-name" aria-live="polite"></strong><small>Resume saved on this computer</small></div><button type="button" id="change-resume" class="memory-refresh">Change</button></div>
+              <div id="resume-upload"><label for="resume-input">Resume <span class="required">*</span></label><input name="resume" id="resume-input" type="file" accept="application/pdf,.pdf" required><small>PDF with selectable text, up to 5 MB. Saved without encryption on this computer.</small></div>
+              <p id="resume-status" class="model-hint" role="status" hidden></p><button type="button" id="resume-revert" class="memory-refresh" hidden>Keep saved resume</button>
+            </div>
             <fieldset class="resume-modes">
               <legend>How should we apply?</legend>
               <label class="resume-mode"><input type="radio" name="resume_mode" value="tailored"><span><strong>1. Tailor and apply automatically</strong><small>AI selects relevant lines from your resume for each job, then applies without asking.</small></span></label>
@@ -80,20 +86,28 @@
               <label class="resume-mode"><input type="radio" name="resume_mode" value="original" checked><span><strong>3. Apply with my original resume</strong><small>Use the uploaded PDF for every application, without a review step.</small></span></label>
               <small>Tailoring adds a page of exact lines from your resume and keeps the original pages. It uses additional AI requests.</small>
             </fieldset>
-            <div class="fields two">
-              <label>AI provider <select name="provider" id="provider" required><option value="">Loading options…</option></select></label>
-              <label>Model <select name="model" id="model" required><option value="">Choose a provider</option></select></label>
-            </div>
-            <p id="model-price" class="model-hint"></p>
-            <label id="custom-model-wrap" hidden>Other model name <input name="custom_model" id="custom-model" maxlength="128" placeholder="Enter a model ID" disabled></label>
-            <label id="workspace-wrap" hidden>Claude workspace ID <span class="optional">only if your key requires one</span><input name="workspace_id" id="workspace-id" maxlength="128" placeholder="Optional workspace ID" disabled></label>
-            <label>API key <span class="required">*</span><input name="api_key" type="password" required minlength="12" maxlength="500" autocomplete="off" placeholder="Paste your provider's key"><small><a id="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a> · API usage may incur charges. Your key stays in this tab until you refresh, close it, or change providers.</small></label>
-            <div>
-              <button type="button" id="test-ai" class="secondary">Test AI connection</button>
-              <small>Uses a small AI request that may incur a charge. No resume or application is sent.</small>
-              <p id="test-ai-result" class="notice" role="status" hidden></p>
-            </div>
-            <p id="privacy-note" class="model-hint" hidden>Gemini's free tier may use submitted data to improve Google's products. Check your plan's privacy terms.</p>
+            <details id="ai-settings" class="ai-settings" open>
+              <summary><span><span aria-hidden="true">⚙</span> AI settings</span><span id="ai-summary" aria-live="polite">Set up your AI</span></summary>
+              <div class="ai-settings-body fields">
+                <div class="fields two">
+                  <label>AI provider <select name="provider" id="provider" required><option value="">Loading options…</option></select></label>
+                  <label>Model <select name="model" id="model" required><option value="">Choose a provider</option></select></label>
+                </div>
+                <p id="model-price" class="model-hint"></p>
+                <label id="custom-model-wrap" hidden>Other model name <input name="custom_model" id="custom-model" maxlength="128" placeholder="Enter a model ID" disabled></label>
+                <label id="workspace-wrap" hidden>Claude workspace ID <span class="optional">only if your key requires one</span><input name="workspace_id" id="workspace-id" maxlength="128" placeholder="Optional workspace ID" disabled></label>
+                <p id="key-saved-note" class="memory-note" hidden>Your key is saved for this provider.</p>
+                <label id="api-key-wrap">API key <span class="required">*</span><input name="api_key" type="password" required minlength="12" maxlength="500" autocomplete="off" placeholder="Paste your provider's key" disabled><small><a id="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a> · API usage may incur charges.</small></label>
+                <div class="key-actions"><button type="button" id="change-key" class="memory-refresh" hidden>Change key</button><button type="button" id="cancel-key" class="memory-refresh" hidden>Keep saved key</button><button type="button" id="remove-key" class="memory-refresh" hidden>Remove saved key</button></div>
+                <p class="memory-note">Your verified key is saved without encryption on this computer. Anyone with access to its files can read it.</p>
+                <div>
+                  <button type="button" id="test-ai" class="secondary" disabled>Test and save key</button>
+                  <small>Uses a small AI request that may incur a charge. No resume or application is sent.</small>
+                  <p id="test-ai-result" class="notice" role="status" hidden></p>
+                </div>
+                <p id="privacy-note" class="model-hint" hidden>Gemini's free tier may use submitted data to improve Google's products. Check your plan's privacy terms.</p>
+              </div>
+            </details>
             <details class="draft-tool">
               <summary>Optional: create a separate editable resume draft</summary>
               <p>Paste a job description to create a draft outside the search. Your resume text and the description are sent to your AI provider, and API charges may apply.</p>
@@ -105,7 +119,7 @@
                 <p class="notice">Check every detail. Only include skills and experience you actually have.</p>
                 <p id="missing-skills" class="model-hint"></p>
                 <button type="button" id="print-draft" class="secondary">Print or save as PDF</button>
-                <small>Choose “Save as PDF”, then upload it above if you want to use it in a search.</small>
+                <small>Drafts are not saved automatically. Choose “Save as PDF”, then upload it above if you want to use it in a search.</small>
               </div>
             </details>
           </div>
@@ -114,7 +128,7 @@
           <p id="error" class="error" role="alert" hidden></p>
           <p id="approval-prompt" class="notice" role="status" hidden>An application is waiting for your approval. <a href="#review-card">Review it</a></p>
           <div class="actions"><button type="submit" id="start" disabled>Find and apply <span aria-hidden="true">↗</span></button><button type="button" id="stop" class="secondary" hidden>Stop after current job</button></div>
-          <small>Test your AI connection before starting a search.</small>
+          <small id="connection-hint">Test your AI settings before starting a search.</small>
         </section>
       </form>
       <aside class="sidebar">

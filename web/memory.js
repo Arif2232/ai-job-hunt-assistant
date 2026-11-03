@@ -18,6 +18,17 @@
   let editVersion = 0;
   let questions = [];
   let loadedProfileValues = {};
+  let changingAccount = false;
+  let waitingProfile = new Map();
+  let pendingProfile = new Map();
+  const profileRevisions = new Map();
+  const profileDirty = new Map();
+  const profileDrafts = new Map();
+  const outstandingProfile = new Map();
+  const profileEdits = {};
+  let profileTimer;
+  let profileWrites = Promise.resolve();
+  let profileLoad = Promise.resolve();
 
   function emailKey(value) { return value.trim().toLowerCase(); }
   function setMessage(value, isError = false) {
@@ -31,16 +42,124 @@
     }
     return emailField.value.trim();
   }
-  async function post(path, values) {
+  async function post(path, values, keepalive = false) {
     const data = new FormData();
     for (const [key, value] of Object.entries(values)) data.set(key, String(value));
     let response;
-    try { response = await fetch(path, { method: 'POST', headers: { 'X-App-Token': token }, body: data }); }
+    try { response = await fetch(path, { method: 'POST', headers: { 'X-App-Token': token }, body: data, keepalive }); }
     catch { throw new Error('Could not reach the app. Check that it is still open.'); }
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Could not update memory.');
     return result;
   }
+  function queueProfile(email, name, value) {
+    const owner = emailKey(email);
+    const key = `${owner}\0${name}`;
+    profileRevisions.set(key, (profileRevisions.get(key) || 0) + 1);
+    if (!outstandingProfile.has(owner)) outstandingProfile.set(owner, new Map());
+    outstandingProfile.get(owner).set(name, { value, revision: profileRevisions.get(key), explicit: false });
+    if (!profileDirty.has(owner)) profileDirty.set(owner, new Set());
+    profileDirty.get(owner).add(name);
+    if (!profileDrafts.has(owner)) profileDrafts.set(owner, new Map());
+    profileDrafts.get(owner).set(name, value);
+    if (!pendingProfile.has(email)) pendingProfile.set(email, {});
+    pendingProfile.get(email)[name] = value;
+    clearTimeout(profileTimer);
+    profileTimer = setTimeout(() => flushProfile().catch(() => {}), 250);
+  }
+  function flushProfile() {
+    clearTimeout(profileTimer);
+    const batches = [...pendingProfile];
+    pendingProfile = new Map();
+    for (const [email, changes] of batches) {
+      const versions = Object.fromEntries(Object.keys(changes).map(name => [name, profileRevisions.get(`${emailKey(email)}\0${name}`)]));
+      const operation = post('/api/memory/profile-fields',
+        { email, fields: JSON.stringify(changes), client_id: saveClientId, revisions: JSON.stringify(versions) }, true);
+      const handled = operation.then(result => {
+        const owner = emailKey(email);
+        for (const name of Object.keys(changes)) {
+          if (outstandingProfile.get(owner)?.get(name)?.revision === versions[name]) outstandingProfile.get(owner).delete(name);
+          if (profileRevisions.get(`${owner}\0${name}`) === versions[name]) {
+            profileDirty.get(owner)?.delete(name);
+            profileDrafts.get(owner)?.delete(name);
+          }
+        }
+        if (emailKey(emailField.value) === emailKey(email)) {
+          for (const [name, value] of Object.entries(changes)) {
+            if (form.elements[name].value.trim() === value) loadedProfileValues[name] = form.elements[name].value;
+          }
+        }
+        if (!pendingProfile.size && message.className === 'error' && message.textContent.startsWith('Could not save your details.')) setMessage('');
+        return result;
+      }).catch(error => {
+        if (remember.checked) {
+          const newer = pendingProfile.get(email) || {};
+          for (const [name, value] of Object.entries(changes)) {
+            if (profileRevisions.get(`${emailKey(email)}\0${name}`) === versions[name] && !(name in newer)) newer[name] = value;
+          }
+          if (Object.keys(newer).length) pendingProfile.set(email, newer);
+        }
+        setMessage('Could not save your details. Check storage access and try again.', true);
+        throw error;
+      });
+      profileWrites = Promise.all([profileWrites.catch(() => {}), handled]).then(([, result]) => result);
+    }
+    return profileWrites;
+  }
+  function saveWaitingProfile(email, firstAccount = false) {
+    const owner = emailKey(email);
+    for (const [name, item] of waitingProfile) {
+      if (!item.owner && firstAccount) item.owner = owner;
+      if (remember.checked && item.owner === owner) {
+        if (form.elements[name].value.trim() === item.value) loadedProfileValues[name] = form.elements[name].value;
+        queueProfile(email, name, item.value);
+        waitingProfile.delete(name);
+      }
+    }
+  }
+  for (const name of profileFields) {
+    form.elements[name].addEventListener('input', () => {
+      profileEdits[name] = (profileEdits[name] || 0) + 1;
+      const value = form.elements[name].value.trim();
+      const owner = emailKey(emailField.value);
+      if (remember.checked && profileLoadedEmail === owner && currentEmail(false)) {
+        loadedProfileValues[name] = form.elements[name].value;
+        queueProfile(emailField.value.trim(), name, value);
+      } else waitingProfile.set(name, { owner: loadedEmail ? owner : '', value });
+    });
+  }
+  window.flushApplicationDetails = async () => {
+    await profileLoad;
+    if (remember.checked && waitingProfile.size && profileLoadedEmail !== emailKey(emailField.value)) {
+      throw new Error('Could not save your details. Load your saved answers and try again.');
+    }
+    await flushProfile();
+    if (pendingProfile.size) await flushProfile();
+  };
+  function saveOutstandingProfile(bindWaiting = false) {
+    const email = currentEmail(false);
+    if (bindWaiting && remember.checked && email) saveWaitingProfile(email, !loadedEmail);
+    for (const [owner, entries] of outstandingProfile) {
+      const allowed = [...entries].filter(([, item]) => remember.checked || item.explicit);
+      if (!allowed.length) continue;
+      const fields = Object.fromEntries(allowed.map(([name, item]) => [name, item.value]));
+      const versions = Object.fromEntries(allowed.map(([name, item]) => [name, item.revision]));
+      const values = { email: owner, fields: JSON.stringify(fields), client_id: saveClientId, revisions: JSON.stringify(versions) };
+      const data = new FormData();
+      for (const [field, value] of Object.entries({ ...values, _token: token })) data.set(field, value);
+      if (!navigator.sendBeacon || !navigator.sendBeacon('/api/memory/profile-fields', data)) {
+        post('/api/memory/profile-fields', values, true).catch(() => {});
+      }
+    }
+  }
+  window.hasPendingApplicationDetails = () => {
+    const email = currentEmail(false);
+    if (remember.checked && email && [...waitingProfile.values()].some(item => item.owner === emailKey(email) || (!item.owner && !loadedEmail))) return true;
+    return [...outstandingProfile.values()].some(entries => [...entries.values()].some(item => remember.checked || item.explicit));
+  };
+  window.savePendingApplicationDetails = () => saveOutstandingProfile(true);
+  window.addEventListener('pagehide', () => saveOutstandingProfile(true));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveOutstandingProfile(); });
   function updatePending() {
     const current = loadedEmail && emailKey(emailField.value) === loadedEmail;
     const count = current ? questions.filter(item => item.pending).length : 0;
@@ -194,10 +313,12 @@
     }
     const version = ++requestVersion;
     const edits = editVersion;
+    const profileAtRequest = { ...profileEdits };
     try {
       const result = await post('/api/memory/list', { email });
       if (version !== requestVersion || emailKey(emailField.value) !== emailKey(email)) return;
       if (edits !== editVersion) return setMessage('Save your edited answers, then refresh to see new questions.');
+      const previousAccount = loadedEmail;
       const previousProfile = loadedEmail === emailKey(email) ? loadedProfileValues : {};
       loadedEmail = emailKey(email);
       container.hidden = false;
@@ -205,12 +326,25 @@
         loadedProfileValues = {};
         for (const name of profileFields) {
           const field = form.elements[name];
-          if (!field.value.trim() || (previousProfile[name] && field.value === previousProfile[name])) {
+          const waiting = waitingProfile.get(name);
+          const owner = emailKey(email);
+          const changedDuringLoad = profileEdits[name] !== profileAtRequest[name];
+          const draft = profileDrafts.get(owner);
+          if (!changedDuringLoad && draft?.has(name)) {
+            field.value = draft.get(name);
+            loadedProfileValues[name] = field.value;
+            continue;
+          }
+          const edited = changedDuringLoad || profileDirty.get(owner)?.has(name) ||
+            (waiting && (waiting.owner === emailKey(email) || (!waiting.owner && !previousAccount)));
+          if (!edited && (!field.value.trim() || (previousProfile[name] && field.value === previousProfile[name]))) {
             field.value = result.profile[name] || '';
             if (field.value) loadedProfileValues[name] = field.value;
           }
         }
         profileLoadedEmail = emailKey(email);
+        changingAccount = false;
+        saveWaitingProfile(email, !previousAccount);
       }
       render(result.questions, email);
       if (result.questions.some(item => item.pending)) manager.open = true;
@@ -222,6 +356,12 @@
   emailField.addEventListener('input', () => {
     requestVersion++;
     if (loadedEmail && emailKey(emailField.value) !== loadedEmail) {
+      if (!changingAccount) {
+        for (const [name, item] of waitingProfile) {
+          if (!item.owner || item.owner === loadedEmail) waitingProfile.delete(name);
+        }
+        changingAccount = true;
+      }
       for (const [name, value] of Object.entries(loadedProfileValues)) {
         if (form.elements[name].value === value) form.elements[name].value = '';
       }
@@ -231,12 +371,34 @@
     container.hidden = !!loadedEmail && emailKey(emailField.value) !== loadedEmail;
     updatePending();
   });
-  emailField.addEventListener('change', () => { if (emailKey(emailField.value) !== loadedEmail) loadMemory({ automatic: true }); });
+  emailField.addEventListener('change', () => {
+    if (emailKey(emailField.value) !== loadedEmail || profileLoadedEmail !== emailKey(emailField.value)) {
+      profileLoad = loadMemory({ automatic: true });
+    }
+  });
   function updateRemember() {
     pausedNote.hidden = remember.checked;
     intro.textContent = remember.checked ?
-      "We save your details when you search. Afterward, answer any missing questions here and we'll remember them for matching applications." :
+      'We save your details for next time. After a search, answer any missing questions here for future applications.' :
       'Automatic saving is off. You can still save your details or add answers below.';
+    if (!remember.checked) {
+      clearTimeout(profileTimer);
+      for (const [key, version] of profileRevisions) profileRevisions.set(key, version + 1);
+      for (const entries of outstandingProfile.values()) {
+        for (const [name, item] of entries) if (!item.explicit) entries.delete(name);
+      }
+      for (const [email, changes] of pendingProfile) {
+        if (emailKey(email) !== emailKey(emailField.value)) continue;
+        for (const [name, value] of Object.entries(changes)) {
+          if (!waitingProfile.has(name)) waitingProfile.set(name, { owner: emailKey(email), value });
+        }
+      }
+      pendingProfile.clear();
+    } else if (profileLoadedEmail === emailKey(emailField.value)) {
+      saveWaitingProfile(emailField.value);
+      const draft = profileDrafts.get(emailKey(emailField.value));
+      if (draft) for (const [name, value] of draft) queueProfile(emailField.value.trim(), name, value);
+    }
   }
   remember.addEventListener('change', updateRemember);
   updateRemember();
@@ -246,19 +408,57 @@
     const email = currentEmail();
     if (!email) return;
     if (profileLoadedEmail !== emailKey(email)) {
+      const previousAccount = loadedEmail;
       setMessage('Checking your saved details…');
       await loadMemory();
-      if (profileLoadedEmail === emailKey(email)) setMessage('Saved details are loaded. Select “Save my details” to store your changes.');
-      return;
+      if (profileLoadedEmail !== emailKey(email) || emailKey(emailField.value) !== emailKey(email)) return;
+      if (previousAccount && previousAccount !== emailKey(email)) {
+        setMessage('Saved details are loaded. Select “Save my details now” to store your changes.');
+        return;
+      }
     }
-    const values = { email };
-    for (const name of profileFields) values[name] = form.elements[name].value.trim();
     requestVersion++;
     try {
-      const result = await post('/api/memory/profile', values);
+      await flushProfile();
+      if (emailKey(emailField.value) !== emailKey(email)) return;
+      const values = { email };
+      const owner = emailKey(email);
+      const versions = {};
+      if (!outstandingProfile.has(owner)) outstandingProfile.set(owner, new Map());
+      if (!profileDirty.has(owner)) profileDirty.set(owner, new Set());
+      if (!profileDrafts.has(owner)) profileDrafts.set(owner, new Map());
+      for (const name of profileFields) {
+        values[name] = form.elements[name].value.trim();
+        const key = `${owner}\0${name}`;
+        versions[name] = (profileRevisions.get(key) || 0) + 1;
+        profileRevisions.set(key, versions[name]);
+        profileDirty.get(owner).add(name);
+        profileDrafts.get(owner).set(name, values[name]);
+        outstandingProfile.get(owner).set(name, { value: values[name], revision: versions[name], explicit: true });
+        loadedProfileValues[name] = form.elements[name].value;
+      }
+      values.client_id = saveClientId;
+      values.revisions = JSON.stringify(versions);
+      const operation = profileWrites.catch(() => {}).then(() => post('/api/memory/profile', values, true));
+      profileWrites = operation;
+      const result = await operation;
+      for (const name of profileFields) {
+        if (outstandingProfile.get(owner)?.get(name)?.revision === versions[name]) outstandingProfile.get(owner).delete(name);
+        if (profileRevisions.get(`${owner}\0${name}`) === versions[name]) {
+          profileDirty.get(owner)?.delete(name);
+          profileDrafts.get(owner)?.delete(name);
+        }
+      }
       if (emailKey(emailField.value) === emailKey(email)) {
         const changed = profileFields.some(name => form.elements[name].value.trim() !== values[name]);
-        setMessage(changed ? 'Earlier details were saved. Save again to keep your latest edits.' : result.message);
+        for (const name of profileFields) {
+          if (form.elements[name].value.trim() === values[name] && profileRevisions.get(`${owner}\0${name}`) === versions[name]) {
+            loadedProfileValues[name] = form.elements[name].value;
+            const waiting = waitingProfile.get(name);
+            if (waiting && (!waiting.owner || waiting.owner === emailKey(email))) waitingProfile.delete(name);
+          }
+        }
+        setMessage(changed ? (remember.checked ? 'Your latest edits will be saved automatically.' : 'Earlier details were saved. Save again to keep your latest edits.') : result.message);
       }
     } catch (err) { setMessage(err.message || 'Could not save your details.', true); }
   });

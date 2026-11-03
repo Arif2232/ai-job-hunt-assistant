@@ -6,12 +6,16 @@ body { margin: 0; }
 .brand-icon { width: 33px; height: 33px; display: grid; place-items: center; border-radius: 10px; color: #fff; background: #356452; font-size: 19px; }
 .local-badge { color: #71837a; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
 .local-badge span { width: 7px; height: 7px; background: #83b397; border-radius: 50%; }
+.header-actions { display: flex; align-items: center; gap: 20px; }
+.settings-button { padding: 8px 10px; color: #456452; background: #eef5ef; font-size: 12px; }
+.settings-button:hover { background: #e2eee4; }
+.settings-button span { padding: 0 4px 0 0; }
 .page { max-width: 1192px; margin: auto; padding: 0 44px; }
 .intro { padding: 59px 0 34px; max-width: 700px; }
 .eyebrow { margin: 0 0 14px; color: #78988a; font-size: 10px; font-weight: 800; letter-spacing: .15em; }
 h1 { margin: 0; font-size: clamp(42px, 5vw, 64px); line-height: 1.02; letter-spacing: -.065em; font-weight: 740; }
 h1 em { color: #6c9a83; font-family: Georgia, serif; font-weight: 400; }
-.intro > p:last-child { max-width: 520px; color: #78847f; font-size: 15px; line-height: 1.65; margin: 18px 0 0; }
+.intro > p:not(.eyebrow):not(.error) { max-width: 520px; color: #78847f; font-size: 15px; line-height: 1.65; margin: 18px 0 0; }
 .layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(270px, 1fr); gap: 20px; align-items: start; }
 .setup { display: grid; gap: 14px; }
 .card, .progress-card { background: #fff; border: 1px solid #e4e9e1; border-radius: 19px; padding: 26px; box-shadow: 0 10px 35px #334f3b08; }
@@ -72,6 +76,22 @@ footer span { color: #85a992; }
 .resume-mode { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; line-height: 1.4; }
 .resume-mode input { margin: 2px 0 0; accent-color: #356452; flex: 0 0 auto; }
 .resume-mode small { margin-top: 3px; }
+.saved-resume { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #dfe7df; border-radius: 10px; color: #41554a; font-size: 13px; }
+.saved-resume strong { overflow-wrap: anywhere; }
+.saved-resume small { margin-top: 3px; }
+.saved-resume button { margin: 0; }
+#resume-status { margin: 8px 0 0; }
+.ai-settings { border: 1px solid #dfe7df; border-radius: 12px; }
+.ai-settings > summary { display: flex; align-items: center; gap: 12px; padding: 15px; cursor: pointer; list-style: none; color: #415c4c; font-size: 13px; font-weight: 700; }
+.ai-settings > summary::-webkit-details-marker { display: none; }
+.ai-settings > summary::after { content: '+'; color: #779484; font-size: 19px; font-weight: 400; }
+.ai-settings[open] > summary::after { content: '−'; }
+.ai-settings > summary > :first-child { flex: 0 0 auto; white-space: nowrap; }
+#ai-summary { flex: 1; min-width: 0; color: #708b79; font-size: 11px; font-weight: 600; text-align: right; }
+.ai-settings-body { padding: 0 15px 15px; }
+.ai-settings-body .memory-note { margin: 0; }
+.key-actions { display: flex; gap: 18px; flex-wrap: wrap; }
+.key-actions .memory-refresh { margin-top: 0; }
 .review-card { min-height: 0; }
 .review-job { color: #41554a; font-weight: 700; font-size: 13px; }
 .review-note, .review-details, .review-highlights, #review-message { color: #63796a; font-size: 12px; line-height: 1.5; }
@@ -89,9 +109,8 @@ footer span { color: #85a992; }
 .memory-card .section-head { margin-bottom: 14px; }
 .memory-intro { margin: 0; color: #63796a; font-size: 13px; line-height: 1.6; }
 .memory-card > .consent { margin-top: 16px; }
-.memory-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
 .memory-note, #memory-message, .memory-add p, .memory-question p { color: #63796a; font-size: 12px; line-height: 1.5; }
-#memory-message { margin: 0; }
+#memory-message { margin: 12px 0 0; }
 #memory-message:empty { display: none; }
 #memory-message.error { color: #a53f3a; }
 .memory-manage { margin-top: 18px; border: 1px solid #e1e9df; border-radius: 12px; }
@@ -114,6 +133,7 @@ footer span { color: #85a992; }
 .memory-add summary { cursor: pointer; color: #456452; font-size: 13px; font-weight: 700; }
 .memory-add label { margin-top: 12px; }
 .memory-add button { margin-top: 12px; }
+.memory-tools { display: flex; gap: 18px; flex-wrap: wrap; }
 .memory-refresh { margin-top: 12px; padding: 5px 0; color: #587865; background: none; font-size: 12px; }
 .memory-refresh:hover { color: #315e4b; background: none; text-decoration: underline; }
 .print-resume { display: none; }

@@ -9,7 +9,7 @@ from pypdf import PdfReader
 from app.server import app
 
 
-async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch(tmp_path, monkeypatch):
+async def test_verified_key_is_hidden_and_used_without_resending_it_from_the_page(tmp_path, monkeypatch):
     from app import server as app_server
 
     monkeypatch.setattr(app_server, 'DATA', tmp_path)
@@ -65,9 +65,12 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch(tm
             await page.locator('input[name="remember_questions"]').uncheck()
             await expect(page.locator('#memory-paused-note')).to_be_visible()
             await expect(page.locator('#memory-intro')).to_contain_text('Automatic saving is off')
+            await page.route('**/api/settings/resume', lambda route: route.fulfill(
+                status=200, content_type='application/json', body='{"filename":"resume.pdf","digest":"' + 'a' * 64 + '"}'))
             await page.locator('input[name="resume"]').set_input_files({
                 'name': 'resume.pdf', 'mimeType': 'application/pdf', 'buffer': b'%PDF-test',
             })
+            await expect(page.locator('#saved-resume-name')).to_have_text('resume.pdf')
             await page.locator('input[name="consent"]').check()
             tested = []
             async def fake_test(route):
@@ -77,6 +80,8 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch(tm
                 else:
                     await route.fulfill(status=200, content_type='application/json', body='{"message":"Connected. You can start your search.","verification":"example-ticket"}')
             await page.route('**/api/test-ai', fake_test)
+            await page.route('**/api/settings/credential', lambda route: route.fulfill(
+                status=200, content_type='application/json', body='{"message":"Connected and saved.","verification":"example-ticket"}'))
             async with page.expect_response('**/api/test-ai'):
                 await page.locator('#test-ai').click()
             await expect(page.locator('#test-ai-result')).to_contain_text('Connection failed')
@@ -87,7 +92,8 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch(tm
             await expect(page.locator('#start')).to_be_enabled()
             assert 'dummy-test-key-only' in tested[0] and 'claude-haiku-5-5' in tested[0]
             assert all(value not in tested[0] for value in ['candidate@example.com', '1234567890', 'resume.pdf'])
-            assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
+            assert await page.locator('input[name="api_key"]').input_value() == ''
+            assert await page.locator('input[name="api_key"]').is_disabled()
             await page.locator('.draft-tool summary').click()
             await page.locator('#job-description').fill('Example job description with enough detail for a test.')
             drafts = []
@@ -106,7 +112,9 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch(tm
             pdf = await page.pdf(format='A4')
             printed = '\n'.join(item.extract_text() for item in PdfReader(io.BytesIO(pdf)).pages)
             assert 'Reviewed draft' in printed and 'API key' not in printed
-            assert 'resume.pdf' in drafts[0] and 'candidate@example.com' not in drafts[0]
+            assert 'resume.pdf' not in drafts[0] and 'dummy-test-key-only' not in drafts[0]
+            await page.locator('#open-settings').click()
+            await page.locator('#change-key').click()
             await page.locator('input[name="api_key"]').fill('different-dummy-key')
             await expect(page.locator('#start')).to_be_disabled()
             await page.locator('input[name="api_key"]').fill('dummy-test-key-only')
@@ -121,12 +129,12 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch(tm
             async with page.expect_response('**/api/start'):
                 await page.locator('#start').click()
             await expect(page.locator('#start')).to_be_enabled()
-            assert len(sent) == 1 and 'dummy-test-key-only' in sent[0]
+            assert len(sent) == 1 and 'dummy-test-key-only' not in sent[0]
             assert 'connection_ticket' in sent[0] and 'example-ticket' in sent[0]
             assert 'relocation' in sent[0] and 'india' in sent[0] and 'one_year' in sent[0]
             assert 'resume_mode' in sent[0] and 'tailored' in sent[0]
             assert 'remember_questions' in sent[0] and 'false' in sent[0]
-            assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
+            assert await page.locator('input[name="api_key"]').input_value() == ''
             await page.route('**/api/status', lambda route: route.fulfill(
                 status=200, content_type='application/json', body='{"running":false,"events":[{"kind":"skipped","message":"Not a close match","url":"https://job-boards.greenhouse.io/example/jobs/123"},{"kind":"error","message":"AI failed"}]}'))
             async with page.expect_response('**/api/start'):
@@ -134,8 +142,9 @@ async def test_key_stays_in_the_tab_after_start_and_clears_on_provider_switch(tm
             await expect(page.locator('#start')).to_be_enabled()
             await expect(page.locator('#status')).to_have_text('Needs attention')
             await expect(page.get_by_role('link', name='Open job ↗')).to_have_attribute('href', 'https://job-boards.greenhouse.io/example/jobs/123')
-            assert len(sent) == 2 and 'dummy-test-key-only' in sent[1]
-            assert await page.locator('input[name="api_key"]').input_value() == 'dummy-test-key-only'
+            assert len(sent) == 2 and 'dummy-test-key-only' not in sent[1]
+            assert await page.locator('input[name="api_key"]').input_value() == ''
+            await page.locator('#open-settings').click()
             await page.select_option('#provider', 'openai')
             assert await page.locator('input[name="api_key"]').input_value() == ''
             assert await page.locator('#test-ai-result').is_hidden()
